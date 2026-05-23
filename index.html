@@ -1,98 +1,34 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <title>GitHub Pages 代理</title>
-    <style>
-        body { font-family: sans-serif; padding: 20px; }
-        #error-msg { color: red; }
-    </style>
+<meta charset="UTF-8">
+<title>自建代理</title>
+<style>
+    body { font-family: sans-serif; padding: 20px; }
+    input { padding: 10px; width: 400px; }
+    button { padding: 10px 15px; cursor: pointer; }
+    iframe { width: 100%; height: 600px; border: 1px solid #ccc; margin-top: 20px; }
+</style>
 </head>
 <body>
-    <div id="content">
-        <h1>GitHub Pages 代理就绪</h1>
-        <p>请使用 <code>?url=目标网址</code> 参数访问。</p>
-        <p id="error-msg"></p>
-    </div>
+    <h3>输入网址并访问（通过手机住宅IP）</h3>
+    <input type="text" id="urlInput" placeholder="输入网址，例如 https://www.google.com">
+    <button onclick="visit()">访问</button>
+    <br><br>
+    <iframe id="webFrame" src="about:blank"></iframe>
 
     <script>
-        const params = new URLSearchParams(window.location.search);
-        const targetUrl = params.get('url');
-
-        if (targetUrl) {
-            const targetOrigin = new URL(targetUrl).origin;
-
-            // 使用更稳定的 CORS 代理
-            // 试试换成这个
-fetch('https://api.codetabs.com/v1/proxy?quest=' + targetUrl)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`HTTP 错误 ${response.status}`);
-                    }
-                    return response.text();
-                })
-                .then(html => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-
-                    // === 1. 注入 base 标签，强制所有相对路径以目标网站为准 ===
-                    const base = doc.createElement('base');
-                    base.href = targetUrl;
-                    doc.head.insertBefore(base, doc.head.firstChild);
-
-                    // === 2. 修复所有资源标签的相对路径 ===
-                    const resourceTags = doc.querySelectorAll('img, script, link[rel="stylesheet"], video, audio, source, image');
-                    resourceTags.forEach(el => {
-                        ['src', 'href', 'data-src', 'poster'].forEach(attr => {
-                            const val = el.getAttribute(attr);
-                            if (val && !val.startsWith('http') && !val.startsWith('data:') && !val.startsWith('//')) {
-                                const absoluteUrl = new URL(val, targetOrigin).href;
-                                el.setAttribute(attr, absoluteUrl);
-                            }
-                        });
-                    });
-
-                    // === 3. 劫持所有链接，使其通过代理打开 ===
-                    const links = doc.querySelectorAll('a');
-                    links.forEach(link => {
-                        const href = link.getAttribute('href');
-                        if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
-                            const absoluteHref = new URL(href, targetOrigin).href;
-                            link.setAttribute('href', `?url=${encodeURIComponent(absoluteHref)}`);
-                            link.setAttribute('target', '_self');
-                        }
-                    });
-
-                    // === 4. 劫持表单提交 ===
-                    const forms = doc.querySelectorAll('form');
-                    forms.forEach(form => {
-                        const action = form.getAttribute('action');
-                        if (action) {
-                            const absoluteAction = new URL(action, targetOrigin).href;
-                            form.setAttribute('action', `?url=${encodeURIComponent(absoluteAction)}`);
-                        }
-                        form.setAttribute('target', '_self');
-                    });
-
-                    // === 5. 写入页面 ===
-                    document.open();
-                    document.write(doc.documentElement.outerHTML);
-                    document.close();
-                })
-                .catch(err => {
-                    document.getElementById('content').innerHTML = `
-                        <h1>代理请求失败</h1>
-                        <p>错误信息：${err.message}</p>
-                        <hr>
-                        <p>可能的原因：</p>
-                        <ul>
-                            <li><b>目标网站拒绝了代理访问</b>（如 Google 提示异常流量）</li>
-                            <li>网络不稳定或目标网站不可达</li>
-                            <li>公共 CORS 代理暂时不可用（可尝试更换）</li>
-                        </ul>
-                        <p><b>建议：</b>尝试重启手机网络更换 IP，或更换 CORS 代理地址后重试。</p>
-                    `;
-                });
+        // ⚠️ 把下面这行替换成你的 Cloudflared 隧道地址 ⚠️
+        const PROXY_HOST = "https://xxxx.trycloudflare.com";
+        
+        function visit() {
+            var rawUrl = document.getElementById('urlInput').value.trim();
+            if (!rawUrl) return;
+            if (!rawUrl.startsWith('http')) rawUrl = 'https://' + rawUrl;
+            
+            // 通过手机代理加载目标网站
+            var proxyUrl = PROXY_HOST + '/proxy?url=' + encodeURIComponent(rawUrl);
+            document.getElementById('webFrame').src = proxyUrl;
         }
     </script>
 </body>
