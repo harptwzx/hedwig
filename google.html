@@ -3,70 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <title>Google 镜像</title>
-    <style>
-        body { margin: 0; padding: 0; }
-        iframe { width: 100%; height: 100vh; border: none; display: none; }
-        #loading { text-align: center; padding-top: 50px; font-family: sans-serif; }
-    </style>
 </head>
 <body>
-    <div id="loading">正在加载 Google...</div>
-    <iframe id="googleFrame" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
-
+    <p>正在跳转到 Google...</p>
     <script>
-        async function loadGoogle() {
-            try {
-                // 通过 CORS 代理获取 Google 的 HTML
-                const response = await fetch('https://corsproxy.io/?' + encodeURIComponent('https://www.google.com/?lite=1'));
-                if (!response.ok) throw new Error('HTTP ' + response.status);
-                
-                const html = await response.text();
-                
-                // 处理 HTML，修复资源路径
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(html, 'text/html');
-                
-                // 注入 base 标签
-                const base = doc.createElement('base');
-                base.href = 'https://www.google.com/';
-                doc.head.insertBefore(base, doc.head.firstChild);
-                
-                // 修复所有相对路径的资源
-                const elements = doc.querySelectorAll('img, script, link[rel="stylesheet"], a');
-                elements.forEach(el => {
-                    ['src', 'href'].forEach(attr => {
-                        const val = el.getAttribute(attr);
-                        if (val && !val.startsWith('http') && !val.startsWith('data:') && !val.startsWith('//')) {
-                            el.setAttribute(attr, new URL(val, 'https://www.google.com/').href);
-                        }
-                    });
-                });
-                
-                // 将所有链接改为通过本页面加载
-                doc.querySelectorAll('a').forEach(link => {
-                    const href = link.getAttribute('href');
-                    if (href && href !== '#') {
-                        const absoluteUrl = new URL(href, 'https://www.google.com/').href;
-                        link.href = 'javascript:void(0)';
-                        link.onclick = function() {
-                            window.location.href = '?url=' + encodeURIComponent(absoluteUrl);
-                        };
-                    }
-                });
-                
-                // 写入 iframe
-                const iframe = document.getElementById('googleFrame');
-                const blob = new Blob([doc.documentElement.outerHTML], { type: 'text/html' });
-                iframe.src = URL.createObjectURL(blob);
-                iframe.style.display = 'block';
-                document.getElementById('loading').style.display = 'none';
-                
-            } catch (e) {
-                document.getElementById('loading').innerHTML = '<h2>加载失败</h2><p>' + e.message + '</p>';
-            }
-        }
-        
-        loadGoogle();
+        // 跳转到 Google 轻量版（几乎不会被风控拦截）
+        window.location.href = "https://www.google.com/?lite=1";
     </script>
 </body>
 </html>
