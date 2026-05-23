@@ -23,7 +23,8 @@
             const targetOrigin = new URL(targetUrl).origin;
 
             // 使用更稳定的 CORS 代理
-            fetch('https://corsproxy.io/?' + encodeURIComponent(targetUrl))
+            // 试试换成这个
+fetch('https://api.codetabs.com/v1/proxy?quest=' + targetUrl)
                 .then(response => {
                     if (!response.ok) {
                         throw new Error(`HTTP 错误 ${response.status}`);
