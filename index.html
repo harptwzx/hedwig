@@ -50,9 +50,15 @@
                     form.setAttribute('target', '_self');
                 });
 
-                document.open();
-                document.write(doc.documentElement.outerHTML);
-                document.close();
+ // 创建一个 base 标签来强制修正所有相对路径
+const base = doc.createElement('base');
+base.href = targetUrl;
+doc.head.insertBefore(base, doc.head.firstChild);
+
+// 将修复后的内容写入页面
+document.open();
+document.write(doc.documentElement.outerHTML);
+document.close();
             })
             .catch(err => {
                 document.body.innerHTML = '<h1>错误</h1><p>' + err.message + '</p>';
