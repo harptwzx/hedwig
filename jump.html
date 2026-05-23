@@ -2,18 +2,13 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>网址跳转</title>
+    <title>跳转</title>
 </head>
 <body>
     <script>
-        // 从 URL 参数获取目标网址并跳转
-        var params = new URLSearchParams(window.location.search);
-        var url = params.get('url');
-        if (url) {
-            window.location.href = url;
-        } else {
-            document.body.innerHTML = '<h2>请使用 ?url=目标网址 参数访问</h2>';
-        }
+        var u = new URLSearchParams(window.location.search).get('url');
+        if (u) { window.location.href = u; }
+        else { document.body.innerHTML = '请使用 ?url=网址'; }
     </script>
 </body>
 </html>
