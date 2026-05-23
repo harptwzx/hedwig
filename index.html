@@ -13,27 +13,43 @@
         fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(targetUrl))
             .then(response => response.text())
             .then(html => {
-                // 创建一个临时的DOM元素来解析和处理HTML
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
 
-                // 修复相对路径的资源（图片、链接、脚本等）
-                const elements = doc.querySelectorAll('img, script, link[rel="stylesheet"], a, image');
+                // 修复元素 src 和 href 等资源路径
+                const elements = doc.querySelectorAll('img, script, link[rel="stylesheet"], image, source, video, audio');
                 elements.forEach(el => {
-                    const srcAttr = el.getAttribute('src') || el.getAttribute('href');
-                    if (srcAttr && !srcAttr.startsWith('http') && !srcAttr.startsWith('data:')) {
-                        // 拼接成绝对路径
-                        const absoluteUrl = new URL(srcAttr, targetOrigin).href;
-                        if (el.hasAttribute('src')) {
-                            el.setAttribute('src', absoluteUrl);
+                    ['src', 'href', 'data-src', 'poster'].forEach(attr => {
+                        const val = el.getAttribute(attr);
+                        if (val && !val.startsWith('http') && !val.startsWith('data:') && !val.startsWith('//')) {
+                            const absoluteUrl = new URL(val, targetOrigin).href;
+                            el.setAttribute(attr, absoluteUrl);
                         }
-                        if (el.hasAttribute('href')) {
-                            el.setAttribute('href', absoluteUrl);
-                        }
+                    });
+                });
+
+                // 修复所有链接，阻止它们跳转，而是通过代理打开
+                const links = doc.querySelectorAll('a');
+                links.forEach(link => {
+                    const href = link.getAttribute('href');
+                    if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
+                        const absoluteHref = new URL(href, targetOrigin).href;
+                        link.setAttribute('href', `?url=${encodeURIComponent(absoluteHref)}`);
+                        link.setAttribute('target', '_self');
                     }
                 });
 
-                // 将修复后的HTML内容写入当前文档
+                // 修复表单提交
+                const forms = doc.querySelectorAll('form');
+                forms.forEach(form => {
+                    const action = form.getAttribute('action');
+                    if (action) {
+                        const absoluteAction = new URL(action, targetOrigin).href;
+                        form.setAttribute('action', `?url=${encodeURIComponent(absoluteAction)}`);
+                    }
+                    form.setAttribute('target', '_self');
+                });
+
                 document.open();
                 document.write(doc.documentElement.outerHTML);
                 document.close();
