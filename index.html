@@ -1,35 +1,123 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta charset="UTF-8">
-<title>自建代理</title>
-<style>
-    body { font-family: sans-serif; padding: 20px; }
-    input { padding: 10px; width: 400px; }
-    button { padding: 10px 15px; cursor: pointer; }
-    iframe { width: 100%; height: 600px; border: 1px solid #ccc; margin-top: 20px; }
-</style>
+    <meta charset="UTF-8">
+    <title>自建代理</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; margin: 0; }
+        #toolbar { position: fixed; top: 0; left: 0; right: 0; background: #f0f0f0; padding: 10px; z-index: 999; border-bottom: 1px solid #ccc; }
+        #toolbar input { padding: 8px; width: 400px; }
+        #toolbar button { padding: 8px 15px; cursor: pointer; }
+        #content { margin-top: 60px; }
+    </style>
 </head>
 <body>
-    <h3>输入网址并访问（通过手机住宅IP）</h3>
-    <input type="text" id="urlInput" placeholder="输入网址，例如 https://www.google.com">
-    <button onclick="visit()">访问</button>
-    <br><br>
-    <iframe id="webFrame" src="about:blank"></iframe>
+    <div id="toolbar">
+        <span>网址：</span>
+        <input type="text" id="urlInput" placeholder="输入网址，例如 https://www.google.com">
+        <button onclick="loadPage()">访问</button>
+        <span style="margin-left:20px;color:#666;">通过手机住宅IP</span>
+    </div>
+    <div id="content"></div>
 
     <script>
-        // ⚠️ 把下面这行替换成你的 Cloudflared 隧道地址 ⚠️
-        const PROXY_HOST = "https://xxxx.trycloudflare.com";
-        
-        function visit() {
+        // ⚠️ 替换成你的 Cloudflared 隧道地址 ⚠️
+        const PROXY_HOST = "https://你的隧道地址.trycloudflare.com";
+
+        async function loadPage() {
             var rawUrl = document.getElementById('urlInput').value.trim();
             if (!rawUrl) return;
             if (!rawUrl.startsWith('http')) rawUrl = 'https://' + rawUrl;
-            
-            // 通过手机代理加载目标网站
-            var proxyUrl = PROXY_HOST + '/proxy?url=' + encodeURIComponent(rawUrl);
-            document.getElementById('webFrame').src = proxyUrl;
+
+            document.getElementById('content').innerHTML = '<p>加载中...</p>';
+
+            try {
+                // 1. 通过手机代理获取目标网站的 HTML
+                var proxyUrl = PROXY_HOST + '/proxy?url=' + encodeURIComponent(rawUrl);
+                var response = await fetch(proxyUrl);
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                var html = await response.text();
+                var targetOrigin = new URL(rawUrl).origin;
+
+                // 2. 用 DOMParser 解析 HTML
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(html, 'text/html');
+
+                // 3. 注入 <base> 标签，自动修复所有相对路径
+                var base = doc.createElement('base');
+                base.href = rawUrl;
+                doc.head.insertBefore(base, doc.head.firstChild);
+
+                // 4. 把页面里的所有链接都改成通过代理加载（避免直接跳转）
+                var links = doc.querySelectorAll('a');
+                links.forEach(function(link) {
+                    var href = link.getAttribute('href');
+                    if (href && !href.startsWith('#') && !href.startsWith('javascript:')) {
+                        try {
+                            var absoluteHref = new URL(href, targetOrigin).href;
+                            link.setAttribute('href', 'javascript:void(0)');
+                            link.setAttribute('onclick', 'window.openProxy("' + absoluteHref + '")');
+                            link.style.cursor = 'pointer';
+                        } catch(e) {}
+                    }
+                });
+
+                // 5. 修复所有图片、脚本、样式等资源的路径
+                var elements = doc.querySelectorAll('img, script, link[rel="stylesheet"], video, audio, source');
+                elements.forEach(function(el) {
+                    ['src', 'href', 'data-src', 'poster'].forEach(function(attr) {
+                        var val = el.getAttribute(attr);
+                        if (val && !val.startsWith('http') && !val.startsWith('data:') && !val.startsWith('//')) {
+                            try {
+                                el.setAttribute(attr, new URL(val, targetOrigin).href);
+                            } catch(e) {}
+                        }
+                    });
+                });
+
+                // 6. 强制加载懒加载的图片
+                var lazyImages = doc.querySelectorAll('img[data-src], img[data-srcset]');
+                lazyImages.forEach(function(img) {
+                    if (img.dataset.src) img.src = img.dataset.src;
+                    if (img.dataset.srcset) img.srcset = img.dataset.srcset;
+                });
+
+                // 7. 把处理好的内容显示在页面上
+                document.getElementById('content').innerHTML = doc.body.innerHTML;
+
+                // 8. 更新浏览器地址栏（但不会刷新页面）
+                window.history.pushState({}, '', '/proxy?url=' + encodeURIComponent(rawUrl));
+
+            } catch (err) {
+                document.getElementById('content').innerHTML = '<h2>加载失败</h2><p>' + err.message + '</p>';
+            }
         }
+
+        // 让页面里的链接也能通过代理打开
+        window.openProxy = function(url) {
+            document.getElementById('urlInput').value = url;
+            loadPage();
+        };
+
+        // 如果 URL 带了参数，自动加载
+        var params = new URLSearchParams(window.location.search);
+        var autoUrl = params.get('url');
+        if (autoUrl) {
+            document.getElementById('urlInput').value = autoUrl;
+            loadPage();
+        }
+
+        // 拦截浏览器的后退/前进，让页面内的导航也走代理
+        window.addEventListener('popstate', function() {
+            var newParams = new URLSearchParams(window.location.search);
+            var newUrl = newParams.get('url');
+            if (newUrl) {
+                document.getElementById('urlInput').value = newUrl;
+                loadPage();
+            }
+        });
     </script>
 </body>
 </html>
