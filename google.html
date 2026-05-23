@@ -4,28 +4,69 @@
     <meta charset="UTF-8">
     <title>Google 镜像</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; text-align: center; }
-        iframe { width: 100%; height: 90vh; border: none; }
+        body { margin: 0; padding: 0; }
+        iframe { width: 100%; height: 100vh; border: none; display: none; }
+        #loading { text-align: center; padding-top: 50px; font-family: sans-serif; }
     </style>
 </head>
 <body>
-    <p>正在通过手机住宅IP加载 Google...</p>
-    <iframe id="googleFrame" src="" style="display:none;"></iframe>
+    <div id="loading">正在加载 Google...</div>
+    <iframe id="googleFrame" sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
 
     <script>
-        // ⚠️ 把你的 Cloudflared 隧道地址填在这里 ⚠️
-        const PROXY_HOST = "https://tile-matrix-friendly-elizabeth.trycloudflare.com";
+        async function loadGoogle() {
+            try {
+                // 通过 CORS 代理获取 Google 的 HTML
+                const response = await fetch('https://corsproxy.io/?' + encodeURIComponent('https://www.google.com/?lite=1'));
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                
+                const html = await response.text();
+                
+                // 处理 HTML，修复资源路径
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // 注入 base 标签
+                const base = doc.createElement('base');
+                base.href = 'https://www.google.com/';
+                doc.head.insertBefore(base, doc.head.firstChild);
+                
+                // 修复所有相对路径的资源
+                const elements = doc.querySelectorAll('img, script, link[rel="stylesheet"], a');
+                elements.forEach(el => {
+                    ['src', 'href'].forEach(attr => {
+                        const val = el.getAttribute(attr);
+                        if (val && !val.startsWith('http') && !val.startsWith('data:') && !val.startsWith('//')) {
+                            el.setAttribute(attr, new URL(val, 'https://www.google.com/').href);
+                        }
+                    });
+                });
+                
+                // 将所有链接改为通过本页面加载
+                doc.querySelectorAll('a').forEach(link => {
+                    const href = link.getAttribute('href');
+                    if (href && href !== '#') {
+                        const absoluteUrl = new URL(href, 'https://www.google.com/').href;
+                        link.href = 'javascript:void(0)';
+                        link.onclick = function() {
+                            window.location.href = '?url=' + encodeURIComponent(absoluteUrl);
+                        };
+                    }
+                });
+                
+                // 写入 iframe
+                const iframe = document.getElementById('googleFrame');
+                const blob = new Blob([doc.documentElement.outerHTML], { type: 'text/html' });
+                iframe.src = URL.createObjectURL(blob);
+                iframe.style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+                
+            } catch (e) {
+                document.getElementById('loading').innerHTML = '<h2>加载失败</h2><p>' + e.message + '</p>';
+            }
+        }
         
-        // 直接通过手机代理加载 Google
-        const proxyUrl = PROXY_HOST + '/proxy?url=' + encodeURIComponent('https://www.google.com');
-        
-        // 设置 iframe 的 src，并显示它
-        const frame = document.getElementById('googleFrame');
-        frame.src = proxyUrl;
-        frame.onload = function() {
-            document.querySelector('p').style.display = 'none';
-            frame.style.display = 'block';
-        };
+        loadGoogle();
     </script>
 </body>
 </html>
