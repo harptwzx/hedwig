@@ -1,4 +1,4 @@
-name = "hedwig-auth"
+name = "hedwig"
 main = "workers/api.js"
 compatibility_date = "2025-06-01"
 
