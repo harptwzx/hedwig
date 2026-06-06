@@ -1,16 +1,121 @@
-<script src="/js/common.js"></script>
-<script>
-    const WORKER_URL = 'https://hedwig.wzx123-snake.workers.dev';
-
-    document.getElementById('githubLoginBtn').addEventListener('click', async (e) => {
-        e.preventDefault();
-        window.location.href = `${WORKER_URL}/auth/login`;
-    });
-
-    // 检查是否已登录，如果已登录，直接跳转到首页
-    Hedwig.initPage().then(() => {
-        if (Hedwig.isLoggedIn()) {
-            window.location.href = '/';
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 · Hedwig</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <style>
+        .login-card {
+            max-width: 400px;
+            margin: 3rem auto;
+            text-align: center;
         }
-    });
-</script>
+        .github-login {
+            background: #24292e;
+            color: white;
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.25rem;
+            text-decoration: none;
+            font-weight: 500;
+            margin-top: 1rem;
+            cursor: pointer;
+            border: none;
+            font-size: 1rem;
+        }
+        .github-login:hover {
+            background: #2c3136;
+        }
+        .guest-link {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #334155;
+        }
+        .guest-link a {
+            color: #94a3b8;
+            text-decoration: none;
+        }
+        .guest-link a:hover {
+            color: #fbbf24;
+        }
+        .info {
+            background: #1e293b;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1.5rem;
+            font-size: 0.85rem;
+            color: #94a3b8;
+        }
+        .error-msg {
+            background: #7f1a1a;
+            color: #fecaca;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="navbar-placeholder"></div>
+
+    <div class="container">
+        <div class="login-card card">
+            <h2>登录</h2>
+            <div class="info">
+                使用 GitHub 账号登录
+            </div>
+            <div id="errorMsg" class="error-msg"></div>
+            <button class="github-login" id="githubLoginBtn">
+                使用 GitHub 登录
+            </button>
+            <div class="guest-link">
+                <a href="/">继续以访客身份浏览</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/common.js"></script>
+    <script>
+        // Worker API 地址（你的 Worker 部署地址）
+        const WORKER_URL = 'https://hedwig.wzx123-snake.workers.dev';
+
+        // 获取 DOM 元素
+        const loginBtn = document.getElementById('githubLoginBtn');
+        const errorMsgDiv = document.getElementById('errorMsg');
+
+        // 登录按钮点击事件
+        loginBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            // 跳转到 Worker 的登录入口
+            window.location.href = WORKER_URL + '/auth/login';
+        });
+
+        // 页面初始化：检查是否已登录
+        Hedwig.initPage().then(function() {
+            if (Hedwig.isLoggedIn()) {
+                // 已登录则跳转到首页
+                window.location.href = '/';
+            }
+        });
+
+        // 检查 URL 参数，显示错误信息
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('error') === 'failed') {
+            errorMsgDiv.textContent = 'GitHub 授权失败，请重试';
+            errorMsgDiv.style.display = 'block';
+        } else if (urlParams.get('success') === 'true') {
+            errorMsgDiv.textContent = '登录成功，正在跳转...';
+            errorMsgDiv.style.display = 'block';
+            errorMsgDiv.style.background = '#1a4731';
+            errorMsgDiv.style.color = '#86efac';
+            // 延迟跳转，让用户看到成功提示
+            setTimeout(function() {
+                window.location.href = '/';
+            }, 1500);
+        }
+    </script>
+</body>
+</html>
