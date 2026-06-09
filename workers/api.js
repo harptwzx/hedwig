@@ -1,3 +1,26 @@
+// 辅助函数：从 GitHub 仓库获取静态文件
+async function serveStaticFile(path) {
+    const repo = 'harptwzx/hedwig';
+    const branch = 'main';
+    const url = `https://raw.githubusercontent.com/${repo}/${branch}/public${path}`;
+    
+    try {
+        const response = await fetch(url);
+        if (response.ok) {
+            const content = await response.text();
+            let contentType = 'text/html';
+            if (path.endsWith('.css')) contentType = 'text/css';
+            if (path.endsWith('.js')) contentType = 'application/javascript';
+            return new Response(content, {
+                headers: { 'Content-Type': contentType }
+            });
+        }
+    } catch (e) {
+        console.error(e);
+    }
+    return null;
+}
+
 export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
@@ -11,33 +34,45 @@ export default {
             return new Response(null, { headers: corsHeaders });
         }
 
-        // 登录入口
-        if (url.pathname === '/auth/login') {
-            const clientId = env.GITHUB_CLIENT_ID;
-            // 动态获取当前访问的域名（重要！）
-            const origin = request.headers.get('Origin') || request.headers.get('Referer') || 'https://hedwig-e85.pages.dev';
-            const baseUrl = origin.split('?')[0];
-            const redirectUri = `${baseUrl}/auth/callback`;
-
-            const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user`;
-            return Response.redirect(githubAuthUrl, 302);
+        // ==================== 静态文件服务 ====================
+        // 首页
+        if (url.pathname === '/' || url.pathname === '/index.html') {
+            return serveStaticFile('/index.html');
+        }
+        // 登录页
+        if (url.pathname === '/login.html') {
+            return serveStaticFile('/login.html');
+        }
+        // CSS 文件
+        if (url.pathname === '/css/common.css') {
+            return serveStaticFile('/css/common.css');
+        }
+        // JS 文件
+        if (url.pathname === '/js/common.js') {
+            return serveStaticFile('/js/common.js');
         }
 
-        // 回调
+        // ==================== API 路由 ====================
+        // GitHub OAuth 登录入口
+        if (url.pathname === '/auth/login') {
+            const clientId = env.GITHUB_CLIENT_ID;
+            const redirectUri = 'https://hedwig.eu.org/auth/callback';
+            const githubUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user`;
+            return Response.redirect(githubUrl, 302);
+        }
+
+        // GitHub OAuth 回调
         if (url.pathname === '/auth/callback') {
             const code = url.searchParams.get('code');
             const clientId = env.GITHUB_CLIENT_ID;
             const clientSecret = env.GITHUB_CLIENT_SECRET;
-
-            // 同样动态获取回调域名
-            const origin = request.headers.get('Origin') || request.headers.get('Referer') || 'https://hedwig-e85.pages.dev';
-            const baseUrl = origin.split('?')[0];
-            const redirectUri = `${baseUrl}/auth/callback`;
+            const redirectUri = 'https://hedwig.eu.org/auth/callback';
 
             try {
+                // 用 code 换取 access_token
                 const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                     body: JSON.stringify({
                         client_id: clientId,
                         client_secret: clientSecret,
@@ -49,28 +84,28 @@ export default {
                 const accessToken = tokenData.access_token;
 
                 if (!accessToken) {
-                    return Response.redirect(`${baseUrl}/login.html?error=failed`, 302);
+                    return Response.redirect('https://hedwig.eu.org/login.html?error=failed', 302);
                 }
 
+                // 返回 HTML 页面，保存 token 并跳转到首页
                 const html = `<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body>
-    <script>
-        localStorage.setItem('github_token', '${accessToken}');
-        window.location.href = '/login.html?success=true';
-    </script>
-</body>
-</html>`;
+                <html>
+                <head><meta charset="UTF-8"></head>
+                <body>
+                    <script>
+                        localStorage.setItem('github_token', '${accessToken}');
+                        window.location.href = '/';
+                    </script>
+                </body>
+                </html>`;
 
-                return new Response(html, {
-                    headers: { 'Content-Type': 'text/html', ...corsHeaders }
-                });
+                return new Response(html, { headers: { 'Content-Type': 'text/html' } });
             } catch (err) {
-                return Response.redirect(`${baseUrl}/login.html?error=failed`, 302);
+                return Response.redirect('https://hedwig.eu.org/login.html?error=failed', 302);
             }
         }
 
+        // 404
         return new Response('Not Found', { status: 404, headers: corsHeaders });
     }
 };
