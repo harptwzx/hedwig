@@ -1,9 +1,5 @@
 name = "hedwig"
 main = "workers/api.js"
-compatibility_date = "2025-06-01"
-
-[vars]
-GITHUB_CLIENT_ID = "你的GitHub OAuth Client ID"
-
-[secrets]
-GITHUB_CLIENT_SECRET = "你的GitHub OAuth Client Secret"
+compatibility_date = "2025-06-10"
+[observability]
+enabled = false
