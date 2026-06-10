@@ -4,7 +4,7 @@ async function serveStaticFile(path) {
     const repo = 'harptwzx/hedwig';
     const branch = 'main';
     const fileUrl = `https://raw.githubusercontent.com/${repo}/${branch}/public${path}`;
-    
+
     try {
         const response = await fetch(fileUrl);
         if (response.ok) {
