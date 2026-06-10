@@ -1,6 +1,6 @@
 export default {
     async fetch(request, env, ctx) {
-        return new Response('Hello! The website will be finished a few days later...Zhouxiang', {
+        return new Response('Hello from Worker! Current time: ' + new Date().toISOString(), {
             headers: { 'Content-Type': 'text/plain' }
         });
     }
