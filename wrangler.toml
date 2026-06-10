@@ -1,4 +1,6 @@
 name = "hedwig"
 main = "workers/api.js"
 compatibility_date = "2025-06-10"
+[observability]
+enabled = false
 
