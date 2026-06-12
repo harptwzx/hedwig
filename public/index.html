@@ -53,7 +53,8 @@
         <div id="guestOnlyArea" class="guest-only-content">
             <div class="card" style="text-align: center;">
                 <p>👋 欢迎来到 Hedwig 魔法世界</p>
-                <a href="/login.html" class="btn-login" style="display: inline-block; margin-top: 0.5rem;">使用 GitHub 登录</a>
+                <a href="/login.html" class="btn-login" style="display: inline-block; margin-top: 0.5rem;">登录</a>
+                <a href="/register.html" class="btn-login" style="display: inline-block; margin-top: 0.5rem; background:#334155;">注册</a>
             </div>
         </div>
     </div>
@@ -68,9 +69,4 @@
                 document.getElementById('welcomeMessage').innerHTML = `欢迎回来，${user.username}！`;
             } else {
                 document.getElementById('userOnlyArea').style.display = 'none';
-                document.getElementById('guestOnlyArea').style.display = 'block';
-            }
-        });
-    </script>
-</body>
-</html>
+                document.getElementById('
