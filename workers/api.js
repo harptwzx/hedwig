@@ -3,10 +3,14 @@ const GITHUB_OWNER = 'harptwzx';
 const GITHUB_REPO = 'hedwig';
 const DATA_PATH = 'data/users/';
 
+// 辅助函数：读取 GitHub 文件
 async function readGitHubFile(filePath, githubToken) {
     const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}`;
     const response = await fetch(url, {
-        headers: { 'Authorization': `token ${githubToken}`, 'User-Agent': 'Hedwig-Worker' }
+        headers: {
+            'Authorization': `token ${githubToken}`,
+            'User-Agent': 'Hedwig-Worker'
+        }
     });
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`GitHub API error: ${response.status}`);
@@ -15,17 +19,23 @@ async function readGitHubFile(filePath, githubToken) {
     return JSON.parse(content);
 }
 
+// 辅助函数：写入 GitHub 文件
 async function writeGitHubFile(filePath, content, commitMessage, githubToken) {
     const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}`;
     let sha = null;
-    const existingResponse = await fetch(url, { headers: { 'Authorization': `token ${githubToken}` } });
+    const existingResponse = await fetch(url, {
+        headers: { 'Authorization': `token ${githubToken}` }
+    });
     if (existingResponse.ok) {
         const existingData = await existingResponse.json();
         sha = existingData.sha;
     }
     const response = await fetch(url, {
         method: 'PUT',
-        headers: { 'Authorization': `token ${githubToken}`, 'Content-Type': 'application/json' },
+        headers: {
+            'Authorization': `token ${githubToken}`,
+            'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
             message: commitMessage,
             content: btoa(JSON.stringify(content, null, 2)),
@@ -35,6 +45,7 @@ async function writeGitHubFile(filePath, content, commitMessage, githubToken) {
     return response.ok;
 }
 
+// 辅助函数：获取静态文件
 async function serveStaticFile(path) {
     const fileUrl = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/public${path}`;
     try {
@@ -68,7 +79,7 @@ export default {
             return new Response(null, { headers: corsHeaders });
         }
         
-        // 静态文件
+        // ==================== 静态文件服务 ====================
         if (url.pathname === '/' || url.pathname === '/index.html') {
             const response = await serveStaticFile('/index.html');
             if (response) return response;
@@ -95,34 +106,29 @@ export default {
             return new Response('JS not found', { status: 404 });
         }
         
-        // ==================== 注册流程：GitHub 验证入口 ====================
+        // ==================== 注册：跳转 GitHub ====================
         if (url.pathname === '/auth/github/register') {
             const state = url.searchParams.get('state');
-            const redirectUri = 'https://hedwig.eu.org/auth/github/register/callback';
-            const githubUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
+            const redirectUri = 'https://hedwig.eu.org/auth/github/callback';
+            const githubUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=register_${state}`;
             return Response.redirect(githubUrl, 302);
         }
         
-        // ==================== 注册流程：GitHub 回调 ====================
-        if (url.pathname === '/auth/github/register/callback') {
+        // ==================== 登录：跳转 GitHub ====================
+        if (url.pathname === '/auth/github/login') {
+            const redirectUri = 'https://hedwig.eu.org/auth/github/callback';
+            const githubUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=login`;
+            return Response.redirect(githubUrl, 302);
+        }
+        
+        // ==================== 统一的 GitHub 回调处理 ====================
+        if (url.pathname === '/auth/github/callback') {
             const code = url.searchParams.get('code');
             const state = url.searchParams.get('state');
-            const redirectUri = 'https://hedwig.eu.org/auth/github/register/callback';
+            const redirectUri = 'https://hedwig.eu.org/auth/github/callback';
             
             try {
-                // 解析待注册的用户信息
-                let pendingUser = null;
-                if (state) {
-                    try {
-                        pendingUser = JSON.parse(atob(state));
-                    } catch(e) {}
-                }
-                
-                if (!pendingUser || !pendingUser.username || !pendingUser.password) {
-                    return Response.redirect('https://hedwig.eu.org/register.html?result=error', 302);
-                }
-                
-                // 用 code 换 token
+                // 用 code 换 access_token
                 const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -137,7 +143,7 @@ export default {
                 const accessToken = tokenData.access_token;
                 
                 if (!accessToken) {
-                    return Response.redirect('https://hedwig.eu.org/register.html?result=error', 302);
+                    return Response.redirect('https://hedwig.eu.org/login.html?error=auth_failed', 302);
                 }
                 
                 // 获取 GitHub 用户信息
@@ -147,46 +153,96 @@ export default {
                 const githubUser = await userRes.json();
                 const githubId = githubUser.id.toString();
                 
-                // 检查该 GitHub ID 是否已被注册
-                const githubCheckPath = `${DATA_PATH}github_${githubId}.json`;
-                const existingGithubUser = await readGitHubFile(githubCheckPath, GITHUB_TOKEN);
+                // 获取用户邮箱
+                const emailRes = await fetch('https://api.github.com/user/emails', {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const emails = await emailRes.json();
+                const primaryEmail = emails.find(e => e.primary)?.email || emails[0]?.email || '';
                 
-                if (existingGithubUser) {
-                    // GitHub 账号已被其他用户绑定
-                    return Response.redirect('https://hedwig.eu.org/register.html?result=github_already_used', 302);
+                // 根据 state 判断是注册还是登录
+                if (state && state.startsWith('register_')) {
+                    // ========== 注册流程 ==========
+                    const pendingData = state.replace('register_', '');
+                    let pendingUser = null;
+                    try {
+                        pendingUser = JSON.parse(atob(pendingData));
+                    } catch(e) {}
+                    
+                    if (!pendingUser || !pendingUser.username || !pendingUser.password) {
+                        return Response.redirect('https://hedwig.eu.org/register.html?result=error', 302);
+                    }
+                    
+                    // 检查 GitHub ID 是否已被注册
+                    const githubCheckPath = `${DATA_PATH}github_${githubId}.json`;
+                    const existingGithubUser = await readGitHubFile(githubCheckPath, GITHUB_TOKEN);
+                    if (existingGithubUser) {
+                        return Response.redirect('https://hedwig.eu.org/register.html?result=github_already_used', 302);
+                    }
+                    
+                    // 检查用户名是否已被占用
+                    const userPath = `${DATA_PATH}user_${pendingUser.username}.json`;
+                    const existingUser = await readGitHubFile(userPath, GITHUB_TOKEN);
+                    if (existingUser) {
+                        return Response.redirect('https://hedwig.eu.org/register.html?result=username_exists', 302);
+                    }
+                    
+                    // 创建用户数据
+                    const userData = {
+                        id: Date.now().toString(),
+                        username: pendingUser.username,
+                        password: btoa(pendingUser.password),
+                        githubId: githubId,
+                        githubLogin: githubUser.login,
+                        email: primaryEmail,
+                        avatar: githubUser.avatar_url,
+                        createdAt: new Date().toISOString()
+                    };
+                    
+                    await writeGitHubFile(userPath, userData, `创建用户: ${pendingUser.username}`, GITHUB_TOKEN);
+                    await writeGitHubFile(githubCheckPath, { username: pendingUser.username, githubId }, `GitHub绑定: ${pendingUser.username}`, GITHUB_TOKEN);
+                    
+                    return Response.redirect('https://hedwig.eu.org/register.html?result=success', 302);
+                    
+                } else {
+                    // ========== 登录流程 ==========
+                    // 通过 GitHub ID 查找用户
+                    const githubCheckPath = `${DATA_PATH}github_${githubId}.json`;
+                    const githubMap = await readGitHubFile(githubCheckPath, GITHUB_TOKEN);
+                    
+                    if (!githubMap) {
+                        return Response.redirect('https://hedwig.eu.org/login.html?error=not_registered', 302);
+                    }
+                    
+                    const userPath = `${DATA_PATH}user_${githubMap.username}.json`;
+                    const userData = await readGitHubFile(userPath, GITHUB_TOKEN);
+                    
+                    if (!userData) {
+                        return Response.redirect('https://hedwig.eu.org/login.html?error=not_found', 302);
+                    }
+                    
+                    const sessionToken = btoa(`${userData.id}:${Date.now()}`);
+                    
+                    const html = `<!DOCTYPE html>
+                    <html>
+                    <body>
+                        <script>
+                            localStorage.setItem('auth_token', '${sessionToken}');
+                            localStorage.setItem('user_info', JSON.stringify({
+                                username: '${userData.username}',
+                                avatar: '${userData.avatar}'
+                            }));
+                            window.location.href = '/';
+                        </script>
+                    </body>
+                    </html>`;
+                    
+                    return new Response(html, { headers: { 'Content-Type': 'text/html' } });
                 }
-                
-                // 检查用户名是否已被占用
-                const userPath = `${DATA_PATH}user_${pendingUser.username}.json`;
-                const existingUser = await readGitHubFile(userPath, GITHUB_TOKEN);
-                
-                if (existingUser) {
-                    return Response.redirect('https://hedwig.eu.org/register.html?result=username_exists', 302);
-                }
-                
-                // 创建用户数据
-                const userData = {
-                    id: Date.now().toString(),
-                    username: pendingUser.username,
-                    password: btoa(pendingUser.password), // 简单加密
-                    githubId: githubId,
-                    githubLogin: githubUser.login,
-                    email: '',
-                    avatar: githubUser.avatar_url,
-                    createdAt: new Date().toISOString()
-                };
-                
-                // 保存用户文件
-                await writeGitHubFile(userPath, userData, `创建用户: ${pendingUser.username}`, GITHUB_TOKEN);
-                
-                // 保存 GitHub ID 映射文件
-                const githubMap = { username: pendingUser.username, githubId: githubId, createdAt: new Date().toISOString() };
-                await writeGitHubFile(githubCheckPath, githubMap, `GitHub 绑定: ${pendingUser.username}`, GITHUB_TOKEN);
-                
-                return Response.redirect('https://hedwig.eu.org/register.html?result=success', 302);
                 
             } catch (err) {
-                return Response.redirect('https://hedwig.eu.org/register.html?result=error', 302);
+                console.error(err);
+                return Response.redirect('https://hedwig.eu.org/login.html?error=auth_failed', 302);
             }
         }
         
@@ -213,11 +269,11 @@ export default {
                     });
                 }
                 
-                const token = btoa(`${userData.id}:${Date.now()}`);
+                const sessionToken = btoa(`${userData.id}:${Date.now()}`);
                 
                 return new Response(JSON.stringify({
                     success: true,
-                    token: token,
+                    token: sessionToken,
                     user: {
                         username: userData.username,
                         avatar: userData.avatar,
@@ -235,7 +291,7 @@ export default {
             }
         }
         
-        // ==================== 获取用户信息 API ====================
+        // ==================== 获取当前用户信息 ====================
         if (url.pathname === '/api/user' && request.method === 'GET') {
             const authHeader = request.headers.get('Authorization');
             const token = authHeader?.replace('Bearer ', '');
@@ -251,12 +307,37 @@ export default {
                 const decoded = atob(token);
                 const userId = decoded.split(':')[0];
                 
-                // 查找用户
-                const usersPath = `${DATA_PATH}`;
-                // 简化：这里需要遍历查找，实际可以维护一个索引
-                // 为简化，我们先用一个临时方案
-                return new Response(JSON.stringify({ error: '暂不支持' }), {
-                    status: 501,
+                // 查找用户文件
+                const urlList = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DATA_PATH}`;
+                const response = await fetch(urlList, {
+                    headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+                });
+                if (!response.ok) {
+                    return new Response(JSON.stringify({ error: '获取用户信息失败' }), {
+                        status: 500,
+                        headers: { 'Content-Type': 'application/json', ...corsHeaders }
+                    });
+                }
+                const files = await response.json();
+                
+                for (const file of files) {
+                    if (file.name.startsWith('user_') && file.name.endsWith('.json')) {
+                        const fileData = await readGitHubFile(`${DATA_PATH}${file.name}`, GITHUB_TOKEN);
+                        if (fileData && fileData.id === userId) {
+                            return new Response(JSON.stringify({
+                                username: fileData.username,
+                                avatar: fileData.avatar,
+                                createdAt: fileData.createdAt
+                            }), {
+                                status: 200,
+                                headers: { 'Content-Type': 'application/json', ...corsHeaders }
+                            });
+                        }
+                    }
+                }
+                
+                return new Response(JSON.stringify({ error: '用户不存在' }), {
+                    status: 404,
                     headers: { 'Content-Type': 'application/json', ...corsHeaders }
                 });
             } catch (error) {
