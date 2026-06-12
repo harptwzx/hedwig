@@ -20,10 +20,6 @@
             margin-top: 1rem;
             border-left: 3px solid #fbbf24;
         }
-        .protected-area h3 {
-            margin-bottom: 0.5rem;
-            color: #fbbf24;
-        }
         .user-only-content {
             display: none;
         }
@@ -34,53 +30,46 @@
 </head>
 <body>
     <div id="navbar-placeholder"></div>
-    
+
     <div class="container">
         <div class="welcome">
             <h1>Hedwig</h1>
             <p>魔法世界入口</p>
             <span id="user-badge" class="badge"></span>
         </div>
-        
+
         <div class="card">
             <h3>公共区域</h3>
             <p>所有人都能看到的内容。</p>
         </div>
-        
+
         <div id="userOnlyArea" class="user-only-content">
             <div class="protected-area">
                 <h3>魔法师专属区域</h3>
-                <p>只有登录用户才能看到这个区域。</p>
-                <div style="margin-top: 1rem;">
-                    <label>你的魔法笔记：</label>
-                    <textarea rows="3" placeholder="写点东西..."></textarea>
-                    <button>保存笔记</button>
-                </div>
+                <p id="welcomeMessage"></p>
             </div>
         </div>
-        
+
         <div id="guestOnlyArea" class="guest-only-content">
             <div class="card" style="text-align: center;">
-                <p>你是访客模式。</p>
-                <a href="/login.html" class="btn-login" style="display: inline-block; margin-top: 0.5rem;">登录解锁更多功能</a>
+                <p>👋 欢迎来到 Hedwig 魔法世界</p>
+                <a href="/login.html" class="btn-login" style="display: inline-block; margin-top: 0.5rem;">使用 GitHub 登录</a>
             </div>
         </div>
-        
-        <div id="featureArea"></div>
     </div>
 
     <script src="/js/common.js"></script>
     <script>
         Hedwig.initPage().then(() => {
             if (Hedwig.isLoggedIn()) {
+                const user = Hedwig.getUser();
                 document.getElementById('userOnlyArea').style.display = 'block';
                 document.getElementById('guestOnlyArea').style.display = 'none';
+                document.getElementById('welcomeMessage').innerHTML = `欢迎回来，${user.username}！`;
             } else {
                 document.getElementById('userOnlyArea').style.display = 'none';
                 document.getElementById('guestOnlyArea').style.display = 'block';
             }
-            
-            Hedwig.showGuestMessage('featureArea', '访客模式下无法使用此功能，请登录');
         });
     </script>
 </body>
