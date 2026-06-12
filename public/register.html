@@ -147,19 +147,14 @@
         const errorMsg = document.getElementById('errorMsg');
         const successMsg = document.getElementById('successMsg');
         
-        // 存储待注册的用户信息
-        let pendingRegistration = null;
-        
         registerBtn.addEventListener('click', async () => {
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
             
-            // 清空提示
             errorMsg.style.display = 'none';
             successMsg.style.display = 'none';
             
-            // 验证表单
             if (!username || !password) {
                 errorMsg.textContent = '用户名和密码不能为空';
                 errorMsg.style.display = 'block';
@@ -178,14 +173,10 @@
                 return;
             }
             
-            // 保存待注册信息，跳转 GitHub 验证
-            pendingRegistration = { username, password };
-            
-            // 跳转到 GitHub 授权
-            window.location.href = '/auth/github/register?state=' + btoa(JSON.stringify(pendingRegistration));
+            const pendingData = btoa(JSON.stringify({ username, password }));
+            window.location.href = '/auth/github/register?state=' + encodeURIComponent(pendingData);
         });
         
-        // 检查 URL 参数中的注册结果
         const urlParams = new URLSearchParams(window.location.search);
         const result = urlParams.get('result');
         
