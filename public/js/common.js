@@ -46,12 +46,12 @@ function renderNavbar() {
     const user = currentUser;
     const userHtml = user
         ? `<div class="user-area">
-            <img class="avatar" src="${user.avatar || 'https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png'}" width="28" height="28" style="border-radius: 50%;">
-            <span class="user-name">${user.username || user.login}</span>
+            <span class="user-name">${user.username}</span>
             <button class="btn-logout" onclick="window.logout()">退出</button>
            </div>`
         : `<div class="user-area">
             <a href="/login.html" class="btn-login">登录</a>
+            <a href="/register.html" class="btn-login" style="background:#334155;">注册</a>
            </div>`;
     
     return `
@@ -69,18 +69,6 @@ async function initPage() {
     const navbarPlaceholder = document.getElementById('navbar-placeholder');
     if (navbarPlaceholder) {
         navbarPlaceholder.innerHTML = renderNavbar();
-    }
-    
-    // 更新用户标识
-    const userBadge = document.getElementById('user-badge');
-    if (userBadge) {
-        if (isLoggedIn()) {
-            userBadge.textContent = `已登录: ${currentUser.username}`;
-            userBadge.className = 'badge user-badge';
-        } else {
-            userBadge.textContent = '未登录';
-            userBadge.className = 'badge guest-badge';
-        }
     }
 }
 
