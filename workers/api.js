@@ -179,7 +179,7 @@ export default {
         
         // ==================== GitHub OAuth 登录 ====================
         if (url.pathname === '/auth/github') {
-            const redirectUri = 'https://hedwig.eu.org/auth/github/callback';
+            const redirectUri = 'https://hedwig.eu.org/auth/callback';
             const githubUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email`;
             return Response.redirect(githubUrl, 302);
         }
