@@ -1,4 +1,6 @@
-// 辅助函数：安全地读取 GitHub 文件
+// ==================== 辅助函数 ====================
+
+// 安全读取 GitHub 文件
 async function safeReadGitHubFile(filePath, token) {
     const url = `https://api.github.com/repos/harptwzx/hedwig/contents/${filePath}`;
     try {
@@ -6,7 +8,7 @@ async function safeReadGitHubFile(filePath, token) {
             headers: { 'Authorization': `token ${token}`, 'User-Agent': 'Hedwig-Worker' }
         });
         if (resp.status === 404) return null;
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
         const data = await resp.json();
         const content = atob(data.content);
         return JSON.parse(content);
@@ -16,11 +18,10 @@ async function safeReadGitHubFile(filePath, token) {
     }
 }
 
-// 辅助函数：安全地写入 GitHub 文件
+// 安全写入 GitHub 文件
 async function safeWriteGitHubFile(filePath, content, commitMsg, token) {
     const url = `https://api.github.com/repos/harptwzx/hedwig/contents/${filePath}`;
     try {
-        // 获取现有文件的 SHA
         let sha = null;
         const existing = await fetch(url, { headers: { 'Authorization': `token ${token}` } });
         if (existing.ok) {
@@ -44,7 +45,7 @@ async function safeWriteGitHubFile(filePath, content, commitMsg, token) {
     }
 }
 
-// 辅助函数：提供静态文件
+// 静态文件服务
 async function serveStatic(path) {
     const fileUrl = `https://raw.githubusercontent.com/harptwzx/hedwig/main/public${path}`;
     try {
@@ -76,7 +77,7 @@ export default {
         }
 
         try {
-            // ========== 静态文件服务 ==========
+            // ========== 静态文件 ==========
             if (url.pathname === '/' || url.pathname === '/index.html') {
                 const res = await serveStatic('/index.html');
                 if (res) return res;
@@ -98,14 +99,13 @@ export default {
                 if (res) return res;
             }
 
-            // ========== 注册入口：跳转 GitHub ==========
+            // ========== 注册入口 ==========
             if (url.pathname === '/auth/register') {
                 const username = url.searchParams.get('username');
                 const password = url.searchParams.get('password');
                 if (!username || !password) {
                     return Response.redirect('https://hedwig.eu.org/register.html?result=error', 302);
                 }
-                // 将用户名密码编码到 state
                 const stateData = JSON.stringify({ username, password });
                 const state = btoa(stateData);
                 const redirectUri = 'https://hedwig.eu.org/auth/github/callback';
@@ -113,7 +113,7 @@ export default {
                 return Response.redirect(githubUrl, 302);
             }
 
-            // ========== 登录入口：跳转 GitHub ==========
+            // ========== 登录入口 ==========
             if (url.pathname === '/auth/login') {
                 const state = btoa('login');
                 const redirectUri = 'https://hedwig.eu.org/auth/github/callback';
@@ -138,34 +138,49 @@ export default {
                     state = { type: 'login' };
                 }
 
-                // 交换 access_token
+                // 交换 token - 关键修正部分
                 const redirectUri = 'https://hedwig.eu.org/auth/github/callback';
-                const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+                const tokenResp = await fetch('https://github.com/login/oauth/access_token', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',  // 强制要求 JSON
+                        'User-Agent': 'Hedwig-Worker'
+                    },
                     body: JSON.stringify({
                         client_id: GITHUB_CLIENT_ID,
                         client_secret: GITHUB_CLIENT_SECRET,
-                        code,
+                        code: code,
                         redirect_uri: redirectUri
                     })
                 });
-                const tokenData = await tokenRes.json();
+
+                // 获取原始文本，先判断是否为 JSON
+                const rawText = await tokenResp.text();
+                let tokenData;
+                try {
+                    tokenData = JSON.parse(rawText);
+                } catch (e) {
+                    console.error('GitHub 返回的不是 JSON:', rawText.substring(0, 200));
+                    return Response.redirect('https://hedwig.eu.org/login.html?error=auth_failed', 302);
+                }
+
                 const accessToken = tokenData.access_token;
                 if (!accessToken) {
+                    console.error('Token 交换失败:', tokenData);
                     return Response.redirect('https://hedwig.eu.org/login.html?error=auth_failed', 302);
                 }
 
                 // 获取 GitHub 用户信息
                 const userRes = await fetch('https://api.github.com/user', {
-                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                    headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
                 });
                 const githubUser = await userRes.json();
                 const githubId = githubUser.id.toString();
 
                 // 获取邮箱
                 const emailRes = await fetch('https://api.github.com/user/emails', {
-                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                    headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
                 });
                 const emails = await emailRes.json();
                 const primaryEmail = emails.find(e => e.primary)?.email || emails[0]?.email || '';
@@ -267,7 +282,7 @@ export default {
                 }), { status: 200, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
             }
 
-            // ========== 获取当前用户信息 ==========
+            // ========== 获取当前用户 ==========
             if (url.pathname === '/api/user' && request.method === 'GET') {
                 const auth = request.headers.get('Authorization');
                 const token = auth?.replace('Bearer ', '');
@@ -300,7 +315,8 @@ export default {
             return new Response('Not Found', { status: 404 });
         } catch (err) {
             console.error('Worker 未捕获异常:', err);
-            return new Response(`内部错误: ${err.message}`, { status: 500 });
+            // 返回更友好的错误信息，但不暴露内部细节
+            return new Response('服务器内部错误，请稍后重试', { status: 500 });
         }
     }
 };
