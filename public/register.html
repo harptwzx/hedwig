@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 · Hedwig</title>
+    <title>注册 · Hedwig</title>
     <link rel="stylesheet" href="/css/common.css">
     <style>
-        .login-card {
+        .register-card {
             max-width: 400px;
             margin: 3rem auto;
             text-align: center;
@@ -37,11 +37,20 @@
             font-size: 0.85rem;
             display: none;
         }
-        .register-link {
+        .success-msg {
+            background: #1a4731;
+            color: #86efac;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+            display: none;
+        }
+        .login-link {
             margin-top: 1.5rem;
             color: #94a3b8;
         }
-        .register-link a {
+        .login-link a {
             color: #fbbf24;
             text-decoration: none;
         }
@@ -51,9 +60,10 @@
     <div id="navbar-placeholder"></div>
 
     <div class="container">
-        <div class="login-card card">
-            <h2>登录</h2>
+        <div class="register-card card">
+            <h2>注册</h2>
             <div id="errorMsg" class="error-msg"></div>
+            <div id="successMsg" class="success-msg"></div>
             
             <div class="form-group">
                 <label>用户名</label>
@@ -63,54 +73,64 @@
                 <label>密码</label>
                 <input type="password" id="password" placeholder="请输入密码">
             </div>
+            <div class="form-group">
+                <label>邮箱（选填）</label>
+                <input type="email" id="email" placeholder="请输入邮箱">
+            </div>
             
-            <button id="loginBtn" style="width: 100%;">登录</button>
+            <button id="registerBtn" style="width: 100%;">注册</button>
             
-            <div class="register-link">
-                还没有账号？ <a href="/register.html">立即注册</a>
+            <div class="login-link">
+                已有账号？ <a href="/login.html">立即登录</a>
             </div>
         </div>
     </div>
 
     <script src="/js/common.js"></script>
     <script>
-        const loginBtn = document.getElementById('loginBtn');
+        const registerBtn = document.getElementById('registerBtn');
         const errorMsg = document.getElementById('errorMsg');
+        const successMsg = document.getElementById('successMsg');
 
-        // 检查是否已登录
-        Hedwig.initPage().then(() => {
-            if (Hedwig.isLoggedIn()) {
-                window.location.href = '/';
-            }
-        });
-
-        loginBtn.addEventListener('click', async () => {
+        registerBtn.addEventListener('click', async () => {
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
+            const email = document.getElementById('email').value.trim();
 
+            // 清空提示
             errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
 
+            // 验证
             if (!username || !password) {
                 errorMsg.textContent = '用户名和密码不能为空';
                 errorMsg.style.display = 'block';
                 return;
             }
 
+            if (password.length < 6) {
+                errorMsg.textContent = '密码长度不能少于6位';
+                errorMsg.style.display = 'block';
+                return;
+            }
+
             try {
-                const response = await fetch('/api/login', {
+                const response = await fetch('/api/register', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ username, password, email })
                 });
 
                 const data = await response.json();
 
                 if (response.ok) {
-                    localStorage.setItem('auth_token', data.token);
-                    localStorage.setItem('current_user', JSON.stringify(data.user));
-                    window.location.href = '/';
+                    successMsg.textContent = data.message || '注册成功，正在跳转登录页...';
+                    successMsg.style.display = 'block';
+                    setTimeout(() => {
+                        window.location.href = '/login.html';
+                    }, 2000);
                 } else {
-                    errorMsg.textContent = data.error || '登录失败';
+                    errorMsg.textContent = data.error || '注册失败';
                     errorMsg.style.display = 'block';
                 }
             } catch (error) {
