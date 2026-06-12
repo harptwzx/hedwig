@@ -6,59 +6,21 @@
     <title>Hedwig · 首页</title>
     <link rel="stylesheet" href="/css/common.css">
     <style>
-        .welcome {
-            margin-bottom: 2rem;
-        }
-        .welcome h1 {
-            font-size: 1.8rem;
-            margin-bottom: 0.5rem;
-        }
-        .protected-area {
-            background: #1e293b;
-            border-radius: 0.5rem;
-            padding: 1.5rem;
-            margin-top: 1rem;
-            border-left: 3px solid #fbbf24;
-        }
-        .user-only-content {
-            display: none;
-        }
-        .guest-only-content {
-            display: none;
-        }
+        .welcome { margin-bottom: 2rem; }
+        .welcome h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+        .protected-area { background: #1e293b; border-radius: 0.5rem; padding: 1.5rem; margin-top: 1rem; border-left: 3px solid #fbbf24; }
+        .user-only-content { display: none; }
+        .guest-only-content { display: none; }
     </style>
 </head>
 <body>
     <div id="navbar-placeholder"></div>
-
     <div class="container">
-        <div class="welcome">
-            <h1>Hedwig</h1>
-            <p>魔法世界入口</p>
-            <span id="user-badge" class="badge"></span>
-        </div>
-
-        <div class="card">
-            <h3>公共区域</h3>
-            <p>所有人都能看到的内容。</p>
-        </div>
-
-        <div id="userOnlyArea" class="user-only-content">
-            <div class="protected-area">
-                <h3>魔法师专属区域</h3>
-                <p id="welcomeMessage"></p>
-            </div>
-        </div>
-
-        <div id="guestOnlyArea" class="guest-only-content">
-            <div class="card" style="text-align: center;">
-                <p>👋 欢迎来到 Hedwig 魔法世界</p>
-                <a href="/login.html" class="btn-login" style="display: inline-block; margin-top: 0.5rem;">登录</a>
-                <a href="/register.html" class="btn-login" style="display: inline-block; margin-top: 0.5rem; background:#334155;">注册</a>
-            </div>
-        </div>
+        <div class="welcome"><h1>Hedwig</h1><p>魔法世界入口</p><span id="user-badge" class="badge"></span></div>
+        <div class="card"><h3>公共区域</h3><p>所有人都能看到的内容。</p></div>
+        <div id="userOnlyArea" class="user-only-content"><div class="protected-area"><h3>魔法师专属区域</h3><p id="welcomeMessage"></p></div></div>
+        <div id="guestOnlyArea" class="guest-only-content"><div class="card" style="text-align:center;"><p>欢迎来到 Hedwig 魔法世界</p><a href="/login.html" class="btn-login">登录</a> <a href="/register.html" class="btn-login" style="background:#334155;">注册</a></div></div>
     </div>
-
     <script src="/js/common.js"></script>
     <script>
         Hedwig.initPage().then(() => {
