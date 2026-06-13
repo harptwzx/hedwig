@@ -8,12 +8,7 @@ async function checkLogin() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         if (resp.ok) {
-            const userInfo = localStorage.getItem('user_info');
-            if (userInfo) currentUser = JSON.parse(userInfo);
-            else {
-                currentUser = await resp.json();
-                localStorage.setItem('user_info', JSON.stringify(currentUser));
-            }
+            currentUser = await resp.json();
             return true;
         } else {
             localStorage.removeItem('auth_token');
@@ -24,42 +19,40 @@ async function checkLogin() {
 }
 
 function isLoggedIn() { return currentUser !== null; }
+function getUser() { return currentUser; }
 function logout() {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user_info');
     currentUser = null;
     window.location.href = '/';
 }
-function getUser() { return currentUser; }
 
 function renderNavbar() {
     const user = currentUser;
-    const userHtml = user
-        ? `<div class="user-area"><span class="user-name">${user.username}</span><button class="btn-logout" onclick="window.logout()">退出</button></div>`
-        : `<div class="user-area"><a href="/login.html" class="btn-login">登录</a><a href="/register.html" class="btn-login" style="background:#334155;">注册</a></div>`;
-    return `<div class="navbar"><div class="nav-container"><a href="/" class="logo">Hedwig</a>${userHtml}</div></div>`;
+    if (user) {
+        return `<div class="navbar"><div class="nav-container">
+            <a href="/" class="logo">Hedwig</a>
+            <div class="user-area">
+                <span>${user.username}</span>
+                <button onclick="logout()">退出</button>
+            </div>
+        </div></div>`;
+    } else {
+        return `<div class="navbar"><div class="nav-container">
+            <a href="/" class="logo">Hedwig</a>
+            <div class="user-area">
+                <a href="/login.html">登录</a>
+                <a href="/register.html">注册</a>
+            </div>
+        </div></div>`;
+    }
 }
 
 async function initPage() {
     await checkLogin();
     const placeholder = document.getElementById('navbar-placeholder');
     if (placeholder) placeholder.innerHTML = renderNavbar();
-    const userBadge = document.getElementById('user-badge');
-    if (userBadge) {
-        if (isLoggedIn()) {
-            userBadge.textContent = `已登录: ${currentUser.username}`;
-            userBadge.className = 'badge user-badge';
-        } else {
-            userBadge.textContent = '未登录';
-            userBadge.className = 'badge guest-badge';
-        }
-    }
 }
 
-function requireAuth(redirectUrl) {
-    if (!isLoggedIn()) { window.location.href = redirectUrl || '/login.html'; return false; }
-    return true;
-}
-
-window.Hedwig = { checkLogin, getUser, isLoggedIn, logout, requireAuth, initPage };
+window.Hedwig = { checkLogin, getUser, isLoggedIn, logout, initPage };
 window.logout = logout;
