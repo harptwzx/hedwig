@@ -6,74 +6,57 @@
     <title>登录 · Hedwig</title>
     <link rel="stylesheet" href="/css/common.css">
     <style>
-        .login-card { max-width: 400px; margin: 3rem auto; text-align: center; }
-        .form-group { margin-bottom: 1rem; text-align: left; }
-        .form-group label { display: block; margin-bottom: 0.5rem; color: #cbd5e6; }
-        .form-group input { width: 100%; padding: 0.75rem; border: 1px solid #334155; border-radius: 0.5rem; background: #0f172a; color: #e2e8f0; font-size: 1rem; }
-        .login-btn { background: #fbbf24; color: #0f172a; width: 100%; padding: 0.75rem; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 0.5rem; }
-        .github-login { background: #24292e; color: white; display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%; padding: 0.75rem; border: none; border-radius: 0.5rem; font-size: 1rem; font-weight: 500; cursor: pointer; text-decoration: none; margin-top: 1rem; }
-        .error-msg { background: #7f1a1a; color: #fecaca; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem; display: none; }
-        .register-link { margin-top: 1.5rem; color: #94a3b8; }
-        .register-link a { color: #fbbf24; text-decoration: none; }
-        .divider { margin: 1.5rem 0; position: relative; text-align: center; }
-        .divider::before { content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: #334155; }
-        .divider span { position: relative; background: #0f172a; padding: 0 0.75rem; color: #94a3b8; font-size: 0.85rem; }
+        .card { max-width: 400px; margin: 50px auto; text-align: center; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid #ccc; }
+        button { background: #fbbf24; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        .github-btn { background: #24292e; color: white; display: inline-block; margin-top: 20px; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
+        .msg { margin-top: 20px; padding: 10px; border-radius: 5px; }
+        .error { background: #7f1a1a; color: #fecaca; }
     </style>
 </head>
 <body>
-    <div id="navbar-placeholder"></div>
     <div class="container">
-        <div class="login-card card">
-            <h2>登录 Hedwig</h2>
-            <div id="errorMsg" class="error-msg"></div>
-            <div class="form-group"><label>用户名</label><input type="text" id="username" placeholder="请输入用户名"></div>
-            <div class="form-group"><label>密码</label><input type="password" id="password" placeholder="请输入密码"></div>
-            <button class="login-btn" id="loginBtn">登录</button>
-            <div class="divider"><span>或者</span></div>
-            <a href="/auth/login" class="github-login">使用 GitHub 登录</a>
-            <div class="register-link">还没有账号？ <a href="/register.html">立即注册</a></div>
+        <div class="card">
+            <h2>登录</h2>
+            <div id="msg" class="msg" style="display:none"></div>
+            <input type="text" id="username" placeholder="用户名">
+            <input type="password" id="password" placeholder="密码">
+            <button id="loginBtn">登录</button>
+            <hr>
+            <a href="/auth/login" class="github-btn">使用 GitHub 登录</a>
+            <p>没有账号？<a href="/register.html">立即注册</a></p>
         </div>
     </div>
     <script src="/js/common.js"></script>
     <script>
-        const loginBtn = document.getElementById('loginBtn');
-        const errorMsg = document.getElementById('errorMsg');
-        Hedwig.initPage().then(() => { if (Hedwig.isLoggedIn()) window.location.href = '/'; });
-        loginBtn.addEventListener('click', async () => {
+        const msgDiv = document.getElementById('msg');
+        function showMsg(text) {
+            msgDiv.textContent = text;
+            msgDiv.className = 'msg error';
+            msgDiv.style.display = 'block';
+        }
+        document.getElementById('loginBtn').onclick = async () => {
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
-            errorMsg.style.display = 'none';
-            if (!username || !password) {
-                errorMsg.textContent = '用户名和密码不能为空';
-                errorMsg.style.display = 'block';
-                return;
+            if (!username || !password) return showMsg('用户名和密码不能为空');
+            const resp = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                localStorage.setItem('auth_token', data.token);
+                localStorage.setItem('user_info', JSON.stringify(data.user));
+                window.location.href = '/';
+            } else {
+                showMsg(data.error || '登录失败');
             }
-            try {
-                const response = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-                const data = await response.json();
-                if (response.ok) {
-                    localStorage.setItem('auth_token', data.token);
-                    localStorage.setItem('user_info', JSON.stringify(data.user));
-                    window.location.href = '/';
-                } else {
-                    errorMsg.textContent = data.error || '登录失败';
-                    errorMsg.style.display = 'block';
-                }
-            } catch (error) {
-                errorMsg.textContent = '网络错误，请重试';
-                errorMsg.style.display = 'block';
-            }
-        });
+        };
         const urlParams = new URLSearchParams(window.location.search);
         const error = urlParams.get('error');
-        if (error === 'auth_failed') errorMsg.textContent = 'GitHub 授权失败，请重试';
-        else if (error === 'not_registered') errorMsg.textContent = '该 GitHub 账号未注册，请先注册';
-        else if (error === 'not_found') errorMsg.textContent = '用户不存在，请先注册';
-        if (errorMsg.textContent) errorMsg.style.display = 'block';
+        if (error === 'not_registered') showMsg('该GitHub账号未注册，请先注册');
+        else if (error === 'auth_failed') showMsg('GitHub授权失败，请重试');
     </script>
 </body>
 </html>
