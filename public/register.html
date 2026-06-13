@@ -1,43 +1,58 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-    <title>注册</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>注册 · Hedwig</title>
+    <link rel="stylesheet" href="/css/common.css">
+    <style>
+        .card { max-width: 400px; margin: 50px auto; text-align: center; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid #ccc; }
+        button { background: #fbbf24; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        .github-btn { background: #24292e; color: white; display: inline-block; margin-top: 20px; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
+        .msg { margin-top: 20px; padding: 10px; border-radius: 5px; }
+        .error { background: #7f1a1a; color: #fecaca; }
+        .success { background: #1a4731; color: #86efac; }
+    </style>
 </head>
 <body>
-    <h2>注册</h2>
-    <input id="username" placeholder="用户名">
-    <input id="password" type="password" placeholder="密码">
-    <input id="confirm" type="password" placeholder="确认密码">
-    <button id="regBtn">注册</button>
-    <div id="msg"></div>
-
+    <div class="container">
+        <div class="card">
+            <h2>注册账号</h2>
+            <div id="msg" class="msg" style="display:none"></div>
+            <input type="text" id="username" placeholder="用户名">
+            <input type="password" id="password" placeholder="密码（至少6位）">
+            <input type="password" id="confirm" placeholder="确认密码">
+            <button id="registerBtn">注册</button>
+            <hr>
+            <a href="/auth/login" class="github-btn">使用 GitHub 注册/登录</a>
+            <p>已有账号？<a href="/login.html">登录</a></p>
+        </div>
+    </div>
     <script>
-        document.getElementById('regBtn').onclick = () => {
+        const msgDiv = document.getElementById('msg');
+        function showMsg(text, type) {
+            msgDiv.textContent = text;
+            msgDiv.className = `msg ${type}`;
+            msgDiv.style.display = 'block';
+        }
+        document.getElementById('registerBtn').onclick = () => {
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
             const confirm = document.getElementById('confirm').value;
-            if (!username || !password) {
-                alert('用户名和密码不能为空');
-                return;
-            }
-            if (password !== confirm) {
-                alert('两次密码不一致');
-                return;
-            }
+            if (!username || !password) return showMsg('用户名和密码不能为空', 'error');
+            if (password.length < 6) return showMsg('密码至少6位', 'error');
+            if (password !== confirm) return showMsg('两次密码不一致', 'error');
             window.location.href = `/auth/register?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
         };
         const urlParams = new URLSearchParams(window.location.search);
         const result = urlParams.get('result');
         if (result === 'success') {
-            document.getElementById('msg').innerText = '注册成功！即将跳转登录...';
+            showMsg('注册成功！正在跳转登录页...', 'success');
             setTimeout(() => location.href = '/login.html', 2000);
-        } else if (result === 'github_already_used') {
-            document.getElementById('msg').innerText = '该GitHub账号已绑定其他用户';
-        } else if (result === 'username_exists') {
-            document.getElementById('msg').innerText = '用户名已被占用';
-        } else if (result === 'error') {
-            document.getElementById('msg').innerText = '注册失败，请重试';
-        }
+        } else if (result === 'github_already_used') showMsg('该GitHub账号已绑定其他用户', 'error');
+        else if (result === 'username_exists') showMsg('用户名已被占用', 'error');
+        else if (result === 'error') showMsg('注册失败，请重试', 'error');
     </script>
 </body>
 </html>
