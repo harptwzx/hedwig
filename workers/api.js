@@ -10,6 +10,38 @@ async function handleRequest(request, env) {
   const path = url.pathname;
   const DOMAIN = env.DOMAIN || 'https://hedwig.eu.org';
 
+  // ========== 静态文件服务 ==========
+  // 处理根路径
+  if (path === '/' || path === '') {
+    return serveStaticFile('index.html', env);
+  }
+  
+  // 处理 .html 文件
+  if (path.endsWith('.html')) {
+    const fileName = path.slice(1);
+    return serveStaticFile(fileName, env);
+  }
+  
+  // 处理 .css 文件
+  if (path.endsWith('.css')) {
+    const fileName = path.slice(1);
+    return serveStaticFile(fileName, env);
+  }
+  
+  // 处理 /css/ 目录下的文件
+  if (path.startsWith('/css/')) {
+    const fileName = path.slice(1);
+    return serveStaticFile(fileName, env);
+  }
+  
+  // 处理 /js/ 目录下的文件（如果有）
+  if (path.startsWith('/js/')) {
+    const fileName = path.slice(1);
+    return serveStaticFile(fileName, env);
+  }
+
+  // ========== API 路由 ==========
+  
   // 1. 发起 GitHub OAuth（注册/登录）
   if (path === '/api/auth/github') {
     try {
@@ -77,20 +109,20 @@ async function handleRequest(request, env) {
         return jsonResponse({ error: 'Username already exists' }, 409);
       }
 
-      // 创建用户数据文件（存储到 data/users/）
+      // 创建用户数据文件
       const userData = {
         username,
-        password,  // 生产环境请加密
+        password,
         githubId: githubUser.id,
         githubLogin: githubUser.login,
         createdAt: new Date().toISOString()
       };
       const writeResult = await writeGitHubFile(env, userFilePath, JSON.stringify(userData, null, 2));
       if (writeResult.error) {
-        return jsonResponse({ error: 'Failed to create user file' }, 500);
+        return jsonResponse({ error: 'Failed to create user file: ' + writeResult.error }, 500);
       }
 
-      // 同时创建 GitHub ID 映射文件（便于快速查找）
+      // 创建 GitHub ID 映射文件
       const githubMapPath = `data/users/github_${githubUser.id}.json`;
       await writeGitHubFile(env, githubMapPath, JSON.stringify({ username }, null, 2));
 
@@ -116,7 +148,7 @@ async function handleRequest(request, env) {
     }
   }
 
-  // 3. 获取用户数据（示例：获取 posts）
+  // 3. 获取用户数据
   if (path === '/api/user/data' && request.method === 'GET') {
     const username = request.headers.get('X-Username');
     if (!username) {
@@ -133,7 +165,31 @@ async function handleRequest(request, env) {
     return new Response(data, { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // 404 - 未找到
   return new Response('Not Found', { status: 404 });
+}
+
+// ========== 静态文件服务函数 ==========
+async function serveStaticFile(filePath, env) {
+  // 尝试从 public 目录读取文件
+  const publicDir = './public';
+  const fullPath = `${publicDir}/${filePath}`;
+  
+  // 使用 Cloudflare Workers 的静态资源 API
+  try {
+    // 注意：这个路径是相对于 worker 脚本的
+    const file = await fetch(new URL(fullPath, import.meta.url));
+    if (file.ok) {
+      return file;
+    }
+  } catch (e) {
+    // 文件不存在，继续尝试其他方式
+  }
+  
+  // 备用方案：从 GitHub 仓库读取（但这样会增加延迟）
+  // 建议直接将静态文件部署到 Pages 的 assets 中
+  
+  return new Response('File not found: ' + filePath, { status: 404 });
 }
 
 // ========== 辅助函数 ==========
@@ -169,7 +225,6 @@ async function writeGitHubFile(env, path, content) {
   const owner = env.GITHUB_REPO_OWNER || 'harptwzx';
   const repo = env.GITHUB_REPO_NAME || 'hedwig';
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
-  // 获取现有文件 SHA（如果存在）
   let sha = null;
   const existing = await fetch(url, {
     headers: { 'Authorization': `token ${env.GITHUB_TOKEN}` }
