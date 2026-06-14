@@ -1,378 +1,225 @@
-// ============================================================
-// 配置
-// ============================================================
-const GITHUB_OWNER = 'harptwzx';
-const GITHUB_REPO = 'hedwig';
-const DATA_PATH = 'data/users/';
-const DOMAIN = 'https://hedwig.eu.org';
+// workers/api.js
+// 处理静态资源、GitHub OAuth、用户数据读写
 
-// ============================================================
-// 辅助函数：写入 GitHub 文件（带详细日志）
-// ============================================================
-async function writeGitHubFile(filePath, content, commitMsg, token) {
-    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}`;
-    console.log(`[写入] 开始写入: ${filePath}`);
-    
-    try {
-        // 1. 检查文件是否已存在，获取 SHA
-        let sha = null;
-        const existing = await fetch(url, { 
-            headers: { 'Authorization': `token ${token}`, 'User-Agent': 'Hedwig-Worker' } 
-        });
-        
-        if (existing.ok) {
-            const existData = await existing.json();
-            sha = existData.sha;
-            console.log(`[写入] 文件已存在，SHA: ${sha}`);
-        } else if (existing.status === 404) {
-            console.log(`[写入] 文件不存在，将创建新文件`);
-        } else {
-            console.log(`[写入] 检查文件时出错: ${existing.status}`);
-        }
-
-        // 2. 准备写入内容
-        const contentStr = JSON.stringify(content, null, 2);
-        const encodedContent = btoa(unescape(encodeURIComponent(contentStr)));
-        
-        const body = {
-            message: commitMsg,
-            content: encodedContent,
-            sha: sha
-        };
-        
-        // 3. 执行写入
-        const resp = await fetch(url, {
-            method: 'PUT',
-            headers: { 
-                'Authorization': `token ${token}`, 
-                'Content-Type': 'application/json',
-                'User-Agent': 'Hedwig-Worker'
-            },
-            body: JSON.stringify(body)
-        });
-        
-        const responseText = await resp.text();
-        console.log(`[写入] 响应状态: ${resp.status}`);
-        console.log(`[写入] 响应内容: ${responseText.substring(0, 200)}`);
-        
-        if (resp.ok) {
-            console.log(`[写入] ✅ 成功写入: ${filePath}`);
-            return true;
-        } else {
-            console.log(`[写入] ❌ 失败: ${resp.status}`);
-            return false;
-        }
-    } catch (err) {
-        console.error(`[写入] 异常:`, err);
-        return false;
-    }
-}
-
-// ============================================================
-// 辅助函数：读取 GitHub 文件
-// ============================================================
-async function readGitHubFile(filePath, token) {
-    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePath}`;
-    try {
-        const resp = await fetch(url, {
-            headers: { 'Authorization': `token ${token}`, 'User-Agent': 'Hedwig-Worker' }
-        });
-        if (resp.status === 404) return null;
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        const content = atob(data.content);
-        return JSON.parse(content);
-    } catch (err) {
-        console.error(`读取失败 ${filePath}:`, err);
-        return null;
-    }
-}
-
-// ============================================================
-// 辅助函数：静态文件服务
-// ============================================================
-async function serveStatic(path) {
-    const url = `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/public${path}`;
-    try {
-        const resp = await fetch(url);
-        if (resp.ok) {
-            let contentType = 'text/html';
-            if (path.endsWith('.css')) contentType = 'text/css';
-            if (path.endsWith('.js')) contentType = 'application/javascript';
-            return new Response(await resp.text(), { headers: { 'Content-Type': contentType } });
-        }
-    } catch (e) { }
-    return null;
-}
-
-// ============================================================
-// Worker 主逻辑
-// ============================================================
 export default {
-    async fetch(request, env, ctx) {
-        const url = new URL(request.url);
-        const { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_TOKEN } = env;
-
-        console.log(`[请求] ${request.method} ${url.pathname}`);
-
-        // 检查环境变量
-        if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET || !GITHUB_TOKEN) {
-            console.error('[错误] 环境变量未配置');
-            return new Response('环境变量未配置', { status: 500 });
-        }
-
-        // 处理 CORS
-        if (request.method === 'OPTIONS') {
-            return new Response(null, {
-                headers: {
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                }
-            });
-        }
-
-        // ========== 静态文件 ==========
-        if (url.pathname === '/' || url.pathname === '/index.html') {
-            const res = await serveStatic('/index.html');
-            if (res) return res;
-        }
-        if (url.pathname === '/login.html') {
-            const res = await serveStatic('/login.html');
-            if (res) return res;
-        }
-        if (url.pathname === '/register.html') {
-            const res = await serveStatic('/register.html');
-            if (res) return res;
-        }
-        if (url.pathname === '/css/common.css') {
-            const res = await serveStatic('/css/common.css');
-            if (res) return res;
-        }
-        if (url.pathname === '/js/common.js') {
-            const res = await serveStatic('/js/common.js');
-            if (res) return res;
-        }
-
-        // ========== 注册入口 ==========
-        if (url.pathname === '/auth/register') {
-            const username = url.searchParams.get('username');
-            const password = url.searchParams.get('password');
-            console.log(`[注册] 收到注册请求: username=${username}`);
-            
-            if (!username || !password) {
-                return Response.redirect(`${DOMAIN}/register.html?result=error`, 302);
-            }
-            const state = btoa(JSON.stringify({ username, password }));
-            const redirectUri = `${DOMAIN}/auth/github/callback`;
-            const githubUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-            console.log(`[注册] 跳转到 GitHub: ${githubUrl}`);
-            return Response.redirect(githubUrl, 302);
-        }
-
-        // ========== GitHub 回调 ==========
-        if (url.pathname === '/auth/github/callback') {
-            const code = url.searchParams.get('code');
-            const stateParam = url.searchParams.get('state');
-            console.log(`[回调] code=${code ? '有' : '无'}, state=${stateParam ? '有' : '无'}`);
-            
-            if (!code) {
-                return Response.redirect(`${DOMAIN}/login.html?error=no_code`, 302);
-            }
-
-            // 解析 state
-            let state;
-            try {
-                state = JSON.parse(atob(stateParam));
-                console.log(`[回调] 解析 state:`, state);
-            } catch (e) {
-                state = 'login';
-            }
-
-            const redirectUri = `${DOMAIN}/auth/github/callback`;
-
-            // 交换 token
-            console.log(`[回调] 开始交换 token...`);
-            const tokenResp = await fetch('https://github.com/login/oauth/access_token', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Hedwig-Worker' },
-                body: JSON.stringify({
-                    client_id: GITHUB_CLIENT_ID,
-                    client_secret: GITHUB_CLIENT_SECRET,
-                    code,
-                    redirect_uri: redirectUri
-                })
-            });
-            const tokenData = await tokenResp.json();
-            const accessToken = tokenData.access_token;
-            console.log(`[回调] token交换结果: ${accessToken ? '成功' : '失败'}`);
-            
-            if (!accessToken) {
-                console.error('[回调] Token 交换失败:', tokenData);
-                return Response.redirect(`${DOMAIN}/login.html?error=token_failed`, 302);
-            }
-
-            // 获取 GitHub 用户信息
-            const userRes = await fetch('https://api.github.com/user', {
-                headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
-            });
-            const githubUser = await userRes.json();
-            const githubId = githubUser.id.toString();
-            console.log(`[回调] GitHub 用户: ${githubUser.login} (ID: ${githubId})`);
-
-            // ========== 注册流程 ==========
-            if (state.username && state.password) {
-                const { username, password } = state;
-                console.log(`[注册流程] 保存用户: ${username}`);
-
-                // 1. 检查 GitHub ID 是否已被注册
-                const githubCheckPath = `${DATA_PATH}github_${githubId}.json`;
-                const existingGithub = await readGitHubFile(githubCheckPath, GITHUB_TOKEN);
-                if (existingGithub) {
-                    console.log(`[注册流程] GitHub ID ${githubId} 已被注册`);
-                    return Response.redirect(`${DOMAIN}/register.html?result=github_already_used`, 302);
-                }
-
-                // 2. 检查用户名是否已被占用
-                const userPath = `${DATA_PATH}user_${username}.json`;
-                const existingUser = await readGitHubFile(userPath, GITHUB_TOKEN);
-                if (existingUser) {
-                    console.log(`[注册流程] 用户名 ${username} 已被占用`);
-                    return Response.redirect(`${DOMAIN}/register.html?result=username_exists`, 302);
-                }
-
-                // 3. 创建用户数据
-                const userData = {
-                    id: Date.now().toString(),
-                    username,
-                    password: btoa(password),
-                    githubId,
-                    githubLogin: githubUser.login,
-                    email: githubUser.email || '',
-                    avatar: githubUser.avatar_url,
-                    createdAt: new Date().toISOString()
-                };
-                
-                console.log(`[注册流程] 准备写入用户文件: ${userPath}`);
-                const ok1 = await writeGitHubFile(userPath, userData, `创建用户: ${username}`, GITHUB_TOKEN);
-                
-                console.log(`[注册流程] 准备写入 GitHub 映射: ${githubCheckPath}`);
-                const ok2 = await writeGitHubFile(githubCheckPath, { username, githubId }, `GitHub绑定: ${username}`, GITHUB_TOKEN);
-                
-                console.log(`[注册流程] 写入结果: user=${ok1}, github=${ok2}`);
-                
-                if (!ok1 || !ok2) {
-                    console.error('[注册流程] 写入失败');
-                    return Response.redirect(`${DOMAIN}/register.html?result=error`, 302);
-                }
-                
-                console.log(`[注册流程] ✅ 注册成功`);
-                return Response.redirect(`${DOMAIN}/register.html?result=success`, 302);
-            }
-
-            // ========== 登录流程 ==========
-            if (state === 'login') {
-                console.log(`[登录流程] 查找 GitHub ID: ${githubId}`);
-                const githubCheckPath = `${DATA_PATH}github_${githubId}.json`;
-                const githubMap = await readGitHubFile(githubCheckPath, GITHUB_TOKEN);
-                if (!githubMap) {
-                    console.log(`[登录流程] GitHub ID ${githubId} 未注册`);
-                    return Response.redirect(`${DOMAIN}/login.html?error=not_registered`, 302);
-                }
-                console.log(`[登录流程] 找到用户: ${githubMap.username}`);
-                
-                const userPath = `${DATA_PATH}user_${githubMap.username}.json`;
-                const userData = await readGitHubFile(userPath, GITHUB_TOKEN);
-                if (!userData) {
-                    return Response.redirect(`${DOMAIN}/login.html?error=not_found`, 302);
-                }
-                
-                const sessionToken = btoa(`${userData.id}:${Date.now()}`);
-                const html = `<!DOCTYPE html>
-                <html>
-                <body>
-                    <script>
-                        localStorage.setItem('auth_token', '${sessionToken}');
-                        localStorage.setItem('user_info', JSON.stringify({
-                            username: '${userData.username}',
-                            avatar: '${userData.avatar}'
-                        }));
-                        window.location.href = '/';
-                    </script>
-                </body>
-                </html>`;
-                return new Response(html, { headers: { 'Content-Type': 'text/html' } });
-            }
-
-            return Response.redirect(`${DOMAIN}/login.html?error=unknown`, 302);
-        }
-
-        // ========== 本地登录 API ==========
-        if (url.pathname === '/api/login' && request.method === 'POST') {
-            const { username, password } = await request.json();
-            console.log(`[API] 本地登录: ${username}`);
-            
-            const userPath = `${DATA_PATH}user_${username}.json`;
-            const userData = await readGitHubFile(userPath, GITHUB_TOKEN);
-            
-            if (!userData) {
-                console.log(`[API] 用户不存在: ${username}`);
-                return new Response(JSON.stringify({ error: '用户名或密码错误' }), {
-                    status: 401,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                });
-            }
-            
-            if (userData.password !== btoa(password)) {
-                console.log(`[API] 密码错误: ${username}`);
-                return new Response(JSON.stringify({ error: '用户名或密码错误' }), {
-                    status: 401,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                });
-            }
-            
-            const sessionToken = btoa(`${userData.id}:${Date.now()}`);
-            console.log(`[API] ✅ 登录成功: ${username}`);
-            
-            return new Response(JSON.stringify({
-                success: true,
-                token: sessionToken,
-                user: { username: userData.username, avatar: userData.avatar, createdAt: userData.createdAt }
-            }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
-        }
-
-        // ========== 获取当前用户 ==========
-        if (url.pathname === '/api/user' && request.method === 'GET') {
-            const auth = request.headers.get('Authorization');
-            const token = auth?.replace('Bearer ', '');
-            if (!token) {
-                return new Response(JSON.stringify({ error: '未登录' }), { status: 401, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
-            }
-            
-            const userId = atob(token).split(':')[0];
-            const listUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${DATA_PATH}`;
-            const listResp = await fetch(listUrl, { headers: { 'Authorization': `token ${GITHUB_TOKEN}` } });
-            
-            if (!listResp.ok) {
-                return new Response(JSON.stringify({ error: '获取用户信息失败' }), { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
-            }
-            
-            const files = await listResp.json();
-            for (const file of files) {
-                if (file.name.startsWith('user_') && file.name.endsWith('.json')) {
-                    const fileData = await readGitHubFile(`${DATA_PATH}${file.name}`, GITHUB_TOKEN);
-                    if (fileData && fileData.id === userId) {
-                        return new Response(JSON.stringify({
-                            username: fileData.username,
-                            avatar: fileData.avatar,
-                            createdAt: fileData.createdAt
-                        }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
-                    }
-                }
-            }
-            return new Response(JSON.stringify({ error: '用户不存在' }), { status: 404, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
-        }
-
-        return new Response('Not Found', { status: 404 });
-    }
+  async fetch(request, env) {
+    return handleRequest(request, env);
+  }
 };
+
+async function handleRequest(request, env) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  // 获取域名（优先环境变量，兜底为你的域名）
+  const DOMAIN = env.DOMAIN || 'https://hedwig.eu.org';
+
+  // 静态资源服务（public 目录）
+  if (path === '/' || path === '/index.html') {
+    return serveStatic('index.html', env);
+  }
+  if (path === '/login.html') {
+    return serveStatic('login.html', env);
+  }
+  if (path === '/register.html') {
+    return serveStatic('register.html', env);
+  }
+  if (path === '/dashboard.html') {
+    return serveStatic('dashboard.html', env);
+  }
+  if (path === '/common.css') {
+    return serveStatic('common.css', env);
+  }
+  if (path.startsWith('/css/')) {
+    return serveStatic(path.slice(1), env);
+  }
+
+  // API: 发起 GitHub OAuth 授权（注册/登录）
+  if (path === '/api/auth/github') {
+    try {
+      const { username, password, action } = await request.json();
+      if (!username || !password || !action) {
+        return new Response(JSON.stringify({ error: 'Missing fields' }), { status: 400 });
+      }
+      // state 中暂存用户信息（Base64 编码）
+      const stateData = btoa(JSON.stringify({ username, password, action }));
+      const redirectUri = `${DOMAIN}/auth/callback`;
+      const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${stateData}&scope=user`;
+      return Response.redirect(githubAuthUrl);
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), { status: 500 });
+    }
+  }
+
+  // API: GitHub OAuth 回调处理（Worker 内部端点）
+  if (path === '/auth/github/callback') {
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    if (!code || !state) {
+      return new Response(JSON.stringify({ error: 'Missing code or state' }), { status: 400 });
+    }
+
+    // 解析 state 中的用户名、密码、动作
+    let userInfo;
+    try {
+      userInfo = JSON.parse(atob(state));
+    } catch (e) {
+      return new Response(JSON.stringify({ error: 'Invalid state' }), { status: 400 });
+    }
+    const { username, password, action } = userInfo;
+
+    // 用 code 换取 access_token
+    const tokenResp = await fetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        client_id: env.GITHUB_CLIENT_ID,
+        client_secret: env.GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: `${DOMAIN}/auth/callback`
+      })
+    });
+    const tokenData = await tokenResp.json();
+    const accessToken = tokenData.access_token;
+    if (!accessToken) {
+      return new Response(JSON.stringify({ error: 'Failed to get access token' }), { status: 500 });
+    }
+
+    // 获取 GitHub 用户信息
+    const userResp = await fetch('https://api.github.com/user', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'User-Agent': 'Hedwig'
+      }
+    });
+    const githubUser = await userResp.json();
+    if (!githubUser.id) {
+      return new Response(JSON.stringify({ error: 'Failed to get GitHub user' }), { status: 500 });
+    }
+
+    // 根据 action 处理注册或登录
+    if (action === 'register') {
+      // 检查用户是否已存在
+      const userFilePath = `data/users/${username}.json`;
+      const existingUser = await readGitHubFile(env, userFilePath);
+      if (existingUser && !existingUser.error) {
+        return new Response(JSON.stringify({ error: 'Username already exists' }), { status: 409 });
+      }
+      // 创建用户数据文件
+      const userData = {
+        username,
+        password, // 实际生产应加密，此处仅为演示
+        githubId: githubUser.id,
+        githubLogin: githubUser.login,
+        createdAt: new Date().toISOString()
+      };
+      const writeResult = await writeGitHubFile(env, userFilePath, JSON.stringify(userData, null, 2));
+      if (writeResult.error) {
+        return new Response(JSON.stringify({ error: 'Failed to create user' }), { status: 500 });
+      }
+      // 同时创建 github_id 映射文件
+      const githubMapPath = `data/users/github_${githubUser.id}.json`;
+      await writeGitHubFile(env, githubMapPath, JSON.stringify({ username }, null, 2));
+      return new Response(JSON.stringify({ success: true, username }), { status: 200 });
+    } 
+    else if (action === 'login') {
+      // 登录：验证用户名密码
+      const userFilePath = `data/users/${username}.json`;
+      const userFile = await readGitHubFile(env, userFilePath);
+      if (userFile.error || !userFile) {
+        return new Response(JSON.stringify({ error: 'User not found' }), { status: 401 });
+      }
+      const userData = JSON.parse(userFile);
+      if (userData.password !== password) {
+        return new Response(JSON.stringify({ error: 'Invalid password' }), { status: 401 });
+      }
+      // 验证 GitHub ID 是否匹配（可选）
+      if (userData.githubId !== githubUser.id) {
+        return new Response(JSON.stringify({ error: 'GitHub account mismatch' }), { status: 403 });
+      }
+      return new Response(JSON.stringify({ success: true, username }), { status: 200 });
+    }
+    else {
+      return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400 });
+    }
+  }
+
+  // API: 获取用户数据（dashboard 用）
+  if (path === '/api/user/data' && request.method === 'GET') {
+    // 从请求头获取用户名（简单实现，生产应使用 session）
+    const username = request.headers.get('X-Username');
+    if (!username) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+    const data = await readGitHubFile(env, `data/users/${username}/posts.json`);
+    if (data.error) {
+      return new Response(JSON.stringify({ posts: [] }), { status: 200 });
+    }
+    return new Response(data, { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // 默认 404
+  return new Response('Not Found', { status: 404 });
+}
+
+// 辅助函数：读取 GitHub 文件
+async function readGitHubFile(env, path) {
+  const url = `https://api.github.com/repos/${env.GITHUB_REPO_OWNER || 'harptwzx'}/${env.GITHUB_REPO_NAME || 'hedwig'}/contents/${path}`;
+  const response = await fetch(url, {
+    headers: {
+      'Authorization': `token ${env.GITHUB_TOKEN}`,
+      'User-Agent': 'Hedwig'
+    }
+  });
+  if (response.status === 404) {
+    return { error: 'not_found' };
+  }
+  if (!response.ok) {
+    return { error: `HTTP ${response.status}` };
+  }
+  const data = await response.json();
+  const content = atob(data.content);
+  return content;
+}
+
+// 辅助函数：写入 GitHub 文件
+async function writeGitHubFile(env, path, content) {
+  const url = `https://api.github.com/repos/${env.GITHUB_REPO_OWNER || 'harptwzx'}/${env.GITHUB_REPO_NAME || 'hedwig'}/contents/${path}`;
+  // 先获取当前文件 SHA（如果存在）
+  let sha = null;
+  const existing = await fetch(url, {
+    headers: { 'Authorization': `token ${env.GITHUB_TOKEN}` }
+  });
+  if (existing.ok) {
+    const existingData = await existing.json();
+    sha = existingData.sha;
+  }
+  const body = {
+    message: `Update ${path} via Hedwig`,
+    content: btoa(unescape(encodeURIComponent(content))), // 处理中文
+    branch: 'main'
+  };
+  if (sha) body.sha = sha;
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `token ${env.GITHUB_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) {
+    return { error: `Write failed: ${response.status}` };
+  }
+  return { success: true };
+}
+
+// 静态资源服务
+async function serveStatic(filePath, env) {
+  // 实际应从 KV 或 assets 读取，这里简单返回 404，你需要根据实际情况实现
+  // 建议将静态文件部署到 Pages 的 public 目录，Worker 只处理 API
+  return new Response('Static file serving not implemented in Worker. Use Pages.', { status: 404 });
+}
