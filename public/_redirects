@@ -1,3 +1,0 @@
-# 未登录用户访问受保护页面时重定向到登录页
-/auth/* /login.html 200
-/login /login.html 200
