@@ -80,29 +80,23 @@ async function serveStaticFile(path) {
     return null;
 }
 
-// 生成会话 Token
-function generateSessionToken(userId) {
-    const payload = {
-        userId: userId,
-        exp: Date.now() + 7 * 24 * 60 * 60 * 1000
-    };
-    return btoa(JSON.stringify(payload));
+// 生成随机的 Session ID
+function generateSessionId() {
+    return crypto.randomUUID();
 }
 
-// 验证会话 Token - 直接从 base64 解码获取 userId
-function getUserIdFromToken(token) {
-    if (!token) return null;
-    try {
-        const decoded = atob(token);
-        const payload = JSON.parse(decoded);
-        if (payload.exp && payload.exp < Date.now()) {
-            return null;
+// 会话存储（内存中）
+let sessions = new Map();
+
+// 清理过期会话（每小时运行一次）
+setInterval(() => {
+    const now = Date.now();
+    for (const [sid, session] of sessions.entries()) {
+        if (session.expires < now) {
+            sessions.delete(sid);
         }
-        return payload.userId;
-    } catch (error) {
-        return null;
     }
-}
+}, 60 * 60 * 1000);
 
 export default {
     async fetch(request, env, ctx) {
@@ -122,10 +116,28 @@ export default {
                 headers: {
                     'Access-Control-Allow-Origin': '*',
                     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+                    'Access-Control-Allow-Headers': 'Content-Type'
                 }
             });
         }
+        
+        // 获取 Cookie 中的 session_id
+        const getSessionId = (request) => {
+            const cookie = request.headers.get('Cookie');
+            if (!cookie) return null;
+            const match = cookie.match(/session_id=([^;]+)/);
+            return match ? match[1] : null;
+        };
+        
+        // 设置 Cookie
+        const setSessionCookie = (sessionId) => {
+            return `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`;
+        };
+        
+        // 清除 Cookie
+        const clearSessionCookie = () => {
+            return `session_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+        };
         
         // 静态文件
         if (path === '/' || path === '/index.html') {
@@ -256,7 +268,7 @@ export default {
                 if (!userWriteSuccess || !mappingWriteSuccess) {
                     return Response.redirect(`${CONFIG.domain}/register.html?error=4`, 302);
                 }
-                return Response.redirect(`${CONFIG.domain}/register.html?success=1`, 302);
+                return Response.redirect(`${CONFIG.domain}/login.html?registered=1`, 302);
             }
             
             // 登录流程
@@ -271,25 +283,20 @@ export default {
                 if (!userData) {
                     return Response.redirect(`${CONFIG.domain}/login.html?error=3`, 302);
                 }
-                userData.lastLogin = new Date().toISOString();
-                await writeGitHubFile(userFilePath, userData, `更新登录: ${userData.username}`, GITHUB_TOKEN);
-                const sessionToken = generateSessionToken(userData.id);
-                const html = `<!DOCTYPE html>
-                <html>
-                <head><meta charset="UTF-8"><title>登录成功</title></head>
-                <body>
-                    <script>
-                        localStorage.setItem('hedwig_token', '${sessionToken}');
-                        localStorage.setItem('hedwig_user', JSON.stringify({
-                            id: '${userData.id}',
-                            username: '${userData.username}',
-                            avatar: '${userData.avatar}'
-                        }));
-                        window.location.href = '/dashboard.html';
-                    </script>
-                </body>
-                </html>`;
-                return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+                
+                // 创建 Session
+                const sessionId = generateSessionId();
+                sessions.set(sessionId, {
+                    userId: userData.id,
+                    username: userData.username,
+                    avatar: userData.avatar,
+                    expires: Date.now() + 7 * 24 * 60 * 60 * 1000
+                });
+                
+                // 设置 Cookie 并跳转
+                const response = Response.redirect(`${CONFIG.domain}/dashboard.html`, 302);
+                response.headers.set('Set-Cookie', setSessionCookie(sessionId));
+                return response;
             }
             return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);
         }
@@ -301,7 +308,7 @@ export default {
                 if (!username || !password) {
                     return new Response(JSON.stringify({ error: '用户名和密码不能为空' }), {
                         status: 400,
-                        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                        headers: { 'Content-Type': 'application/json' }
                     });
                 }
                 const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
@@ -309,137 +316,69 @@ export default {
                 if (!userData || userData.password !== btoa(password)) {
                     return new Response(JSON.stringify({ error: '用户名或密码错误' }), {
                         status: 401,
-                        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                        headers: { 'Content-Type': 'application/json' }
                     });
                 }
-                userData.lastLogin = new Date().toISOString();
-                await writeGitHubFile(userFilePath, userData, `更新登录: ${username}`, GITHUB_TOKEN);
-                const sessionToken = generateSessionToken(userData.id);
-                return new Response(JSON.stringify({
+                
+                // 创建 Session
+                const sessionId = generateSessionId();
+                sessions.set(sessionId, {
+                    userId: userData.id,
+                    username: userData.username,
+                    avatar: userData.avatar,
+                    expires: Date.now() + 7 * 24 * 60 * 60 * 1000
+                });
+                
+                const response = new Response(JSON.stringify({
                     success: true,
-                    token: sessionToken,
-                    user: {
-                        id: userData.id,
-                        username: userData.username,
-                        avatar: userData.avatar
-                    }
-                }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+                    redirect: '/dashboard.html'
+                }), { headers: { 'Content-Type': 'application/json' } });
+                response.headers.set('Set-Cookie', setSessionCookie(sessionId));
+                return response;
             } catch (error) {
                 return new Response(JSON.stringify({ error: '服务器错误' }), {
                     status: 500,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    headers: { 'Content-Type': 'application/json' }
                 });
             }
         }
         
-        // 获取当前用户 - 核心修复
+        // 获取当前用户（通过 Cookie）
         if (path === '/api/current-user' && request.method === 'GET') {
-            const authHeader = request.headers.get('Authorization');
-            const token = authHeader?.replace('Bearer ', '');
+            const sessionId = getSessionId(request);
             
-            if (!token) {
+            if (!sessionId) {
                 return new Response(JSON.stringify({ user: null }), {
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    headers: { 'Content-Type': 'application/json' }
                 });
             }
             
-            try {
-                // 从 token 获取 userId
-                const userId = getUserIdFromToken(token);
-                
-                if (!userId) {
-                    return new Response(JSON.stringify({ user: null }), {
-                        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                    });
-                }
-                
-                // 从 GitHub 查找用户
-                const listUrl = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.dataPath}`;
-                const listResponse = await fetch(listUrl, {
-                    headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
-                });
-                
-                if (!listResponse.ok) {
-                    return new Response(JSON.stringify({ user: null }), {
-                        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                    });
-                }
-                
-                const files = await listResponse.json();
-                
-                for (const file of files) {
-                    if (file.name.startsWith('user_') && file.name.endsWith('.json')) {
-                        const fileData = await readGitHubFile(`${CONFIG.dataPath}${file.name}`, GITHUB_TOKEN);
-                        if (fileData && fileData.id === userId) {
-                            return new Response(JSON.stringify({
-                                user: {
-                                    id: fileData.id,
-                                    username: fileData.username,
-                                    avatar: fileData.avatar
-                                }
-                            }), {
-                                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                            });
-                        }
-                    }
-                }
-                
+            const session = sessions.get(sessionId);
+            if (!session || session.expires < Date.now()) {
+                if (session) sessions.delete(sessionId);
                 return new Response(JSON.stringify({ user: null }), {
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                });
-            } catch (error) {
-                return new Response(JSON.stringify({ user: null }), {
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    headers: { 'Content-Type': 'application/json' }
                 });
             }
+            
+            return new Response(JSON.stringify({
+                user: {
+                    id: session.userId,
+                    username: session.username,
+                    avatar: session.avatar
+                }
+            }), { headers: { 'Content-Type': 'application/json' } });
         }
         
-        // 获取用户信息（通过 ID）
-        if (path === '/api/user' && request.method === 'GET') {
-            const authHeader = request.headers.get('Authorization');
-            const token = authHeader?.replace('Bearer ', '');
-            if (!token) {
-                return new Response(JSON.stringify({ error: '未登录' }), {
-                    status: 401,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                });
+        // 退出登录
+        if (path === '/api/logout' && request.method === 'POST') {
+            const sessionId = getSessionId(request);
+            if (sessionId) {
+                sessions.delete(sessionId);
             }
-            const userId = getUserIdFromToken(token);
-            if (!userId) {
-                return new Response(JSON.stringify({ error: '登录已过期' }), {
-                    status: 401,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                });
-            }
-            const listUrl = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.dataPath}`;
-            const listResponse = await fetch(listUrl, {
-                headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
-            });
-            if (!listResponse.ok) {
-                return new Response(JSON.stringify({ error: '获取用户信息失败' }), {
-                    status: 500,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                });
-            }
-            const files = await listResponse.json();
-            for (const file of files) {
-                if (file.name.startsWith('user_') && file.name.endsWith('.json')) {
-                    const fileData = await readGitHubFile(`${CONFIG.dataPath}${file.name}`, GITHUB_TOKEN);
-                    if (fileData && fileData.id === userId) {
-                        return new Response(JSON.stringify({
-                            id: fileData.id,
-                            username: fileData.username,
-                            avatar: fileData.avatar
-                        }), {
-                            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                        });
-                    }
-                }
-            }
-            return new Response(JSON.stringify({ error: '用户不存在' }), {
-                status: 404,
-                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-            });
+            const response = new Response(JSON.stringify({ success: true }));
+            response.headers.set('Set-Cookie', clearSessionCookie());
+            return response;
         }
         
         return new Response('Not Found', { status: 404 });
