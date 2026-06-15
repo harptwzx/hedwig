@@ -84,17 +84,20 @@ async function serveStaticFile(path) {
 function generateSessionToken(userId) {
     const payload = {
         userId: userId,
-        exp: Date.now() + 7 * 24 * 60 * 60 * 1000,
-        random: Math.random()
+        exp: Date.now() + 7 * 24 * 60 * 60 * 1000
     };
     return btoa(JSON.stringify(payload));
 }
 
-// 验证会话 Token
-function verifySessionToken(token) {
+// 验证会话 Token - 直接从 base64 解码获取 userId
+function getUserIdFromToken(token) {
+    if (!token) return null;
     try {
-        const payload = JSON.parse(atob(token));
-        if (payload.exp < Date.now()) return null;
+        const decoded = atob(token);
+        const payload = JSON.parse(decoded);
+        if (payload.exp && payload.exp < Date.now()) {
+            return null;
+        }
         return payload.userId;
     } catch (error) {
         return null;
@@ -318,9 +321,7 @@ export default {
                     user: {
                         id: userData.id,
                         username: userData.username,
-                        avatar: userData.avatar,
-                        email: userData.email,
-                        createdAt: userData.createdAt
+                        avatar: userData.avatar
                     }
                 }), { headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
             } catch (error) {
@@ -331,27 +332,22 @@ export default {
             }
         }
         
-        // 获取当前用户（核心修复）
+        // 获取当前用户 - 核心修复
         if (path === '/api/current-user' && request.method === 'GET') {
             const authHeader = request.headers.get('Authorization');
             const token = authHeader?.replace('Bearer ', '');
             
-            console.log('[current-user] 收到请求, token:', token ? token.substring(0, 30) + '...' : '无');
-            
             if (!token) {
-                console.log('[current-user] 无 token，返回 null');
                 return new Response(JSON.stringify({ user: null }), {
                     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                 });
             }
             
             try {
-                // 验证 token
-                const userId = verifySessionToken(token);
-                console.log('[current-user] 验证后的 userId:', userId);
+                // 从 token 获取 userId
+                const userId = getUserIdFromToken(token);
                 
                 if (!userId) {
-                    console.log('[current-user] token 无效');
                     return new Response(JSON.stringify({ user: null }), {
                         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                     });
@@ -364,28 +360,22 @@ export default {
                 });
                 
                 if (!listResponse.ok) {
-                    console.log('[current-user] 获取文件列表失败:', listResponse.status);
                     return new Response(JSON.stringify({ user: null }), {
                         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                     });
                 }
                 
                 const files = await listResponse.json();
-                console.log('[current-user] 文件数量:', files?.length || 0);
                 
                 for (const file of files) {
                     if (file.name.startsWith('user_') && file.name.endsWith('.json')) {
                         const fileData = await readGitHubFile(`${CONFIG.dataPath}${file.name}`, GITHUB_TOKEN);
-                        console.log('[current-user] 检查文件:', file.name, '用户ID:', fileData?.id);
                         if (fileData && fileData.id === userId) {
-                            console.log('[current-user] 找到用户:', fileData.username);
                             return new Response(JSON.stringify({
                                 user: {
                                     id: fileData.id,
                                     username: fileData.username,
-                                    avatar: fileData.avatar,
-                                    email: fileData.email,
-                                    createdAt: fileData.createdAt
+                                    avatar: fileData.avatar
                                 }
                             }), {
                                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -394,12 +384,10 @@ export default {
                     }
                 }
                 
-                console.log('[current-user] 未找到匹配的用户, userId=', userId);
                 return new Response(JSON.stringify({ user: null }), {
                     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                 });
             } catch (error) {
-                console.error('[current-user] 异常:', error);
                 return new Response(JSON.stringify({ user: null }), {
                     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                 });
@@ -416,7 +404,7 @@ export default {
                     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                 });
             }
-            const userId = verifySessionToken(token);
+            const userId = getUserIdFromToken(token);
             if (!userId) {
                 return new Response(JSON.stringify({ error: '登录已过期' }), {
                     status: 401,
@@ -441,9 +429,7 @@ export default {
                         return new Response(JSON.stringify({
                             id: fileData.id,
                             username: fileData.username,
-                            avatar: fileData.avatar,
-                            email: fileData.email,
-                            createdAt: fileData.createdAt
+                            avatar: fileData.avatar
                         }), {
                             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                         });
