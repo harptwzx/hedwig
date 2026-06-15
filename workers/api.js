@@ -331,7 +331,82 @@ export default {
             }
         }
         
-        // 获取当前用户
+        // 获取当前用户（核心修复）
+        if (path === '/api/current-user' && request.method === 'GET') {
+            const authHeader = request.headers.get('Authorization');
+            const token = authHeader?.replace('Bearer ', '');
+            
+            console.log('[current-user] 收到请求, token:', token ? token.substring(0, 30) + '...' : '无');
+            
+            if (!token) {
+                console.log('[current-user] 无 token，返回 null');
+                return new Response(JSON.stringify({ user: null }), {
+                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                });
+            }
+            
+            try {
+                // 验证 token
+                const userId = verifySessionToken(token);
+                console.log('[current-user] 验证后的 userId:', userId);
+                
+                if (!userId) {
+                    console.log('[current-user] token 无效');
+                    return new Response(JSON.stringify({ user: null }), {
+                        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    });
+                }
+                
+                // 从 GitHub 查找用户
+                const listUrl = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.dataPath}`;
+                const listResponse = await fetch(listUrl, {
+                    headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
+                });
+                
+                if (!listResponse.ok) {
+                    console.log('[current-user] 获取文件列表失败:', listResponse.status);
+                    return new Response(JSON.stringify({ user: null }), {
+                        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    });
+                }
+                
+                const files = await listResponse.json();
+                console.log('[current-user] 文件数量:', files?.length || 0);
+                
+                for (const file of files) {
+                    if (file.name.startsWith('user_') && file.name.endsWith('.json')) {
+                        const fileData = await readGitHubFile(`${CONFIG.dataPath}${file.name}`, GITHUB_TOKEN);
+                        console.log('[current-user] 检查文件:', file.name, '用户ID:', fileData?.id);
+                        if (fileData && fileData.id === userId) {
+                            console.log('[current-user] 找到用户:', fileData.username);
+                            return new Response(JSON.stringify({
+                                user: {
+                                    id: fileData.id,
+                                    username: fileData.username,
+                                    avatar: fileData.avatar,
+                                    email: fileData.email,
+                                    createdAt: fileData.createdAt
+                                }
+                            }), {
+                                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                            });
+                        }
+                    }
+                }
+                
+                console.log('[current-user] 未找到匹配的用户, userId=', userId);
+                return new Response(JSON.stringify({ user: null }), {
+                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                });
+            } catch (error) {
+                console.error('[current-user] 异常:', error);
+                return new Response(JSON.stringify({ user: null }), {
+                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                });
+            }
+        }
+        
+        // 获取用户信息（通过 ID）
         if (path === '/api/user' && request.method === 'GET') {
             const authHeader = request.headers.get('Authorization');
             const token = authHeader?.replace('Bearer ', '');
@@ -361,14 +436,14 @@ export default {
             const files = await listResponse.json();
             for (const file of files) {
                 if (file.name.startsWith('user_') && file.name.endsWith('.json')) {
-                    const userData = await readGitHubFile(`${CONFIG.dataPath}${file.name}`, GITHUB_TOKEN);
-                    if (userData && userData.id === userId) {
+                    const fileData = await readGitHubFile(`${CONFIG.dataPath}${file.name}`, GITHUB_TOKEN);
+                    if (fileData && fileData.id === userId) {
                         return new Response(JSON.stringify({
-                            id: userData.id,
-                            username: userData.username,
-                            avatar: userData.avatar,
-                            email: userData.email,
-                            createdAt: userData.createdAt
+                            id: fileData.id,
+                            username: fileData.username,
+                            avatar: fileData.avatar,
+                            email: fileData.email,
+                            createdAt: fileData.createdAt
                         }), {
                             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                         });
@@ -377,49 +452,6 @@ export default {
             }
             return new Response(JSON.stringify({ error: '用户不存在' }), {
                 status: 404,
-                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-            });
-        }
-        
-        // 获取当前用户（简单版）
-        if (path === '/api/current-user' && request.method === 'GET') {
-            const authHeader = request.headers.get('Authorization');
-            const token = authHeader?.replace('Bearer ', '');
-            if (!token) {
-                return new Response(JSON.stringify({ user: null }), {
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                });
-            }
-            const userId = verifySessionToken(token);
-            if (!userId) {
-                return new Response(JSON.stringify({ user: null }), {
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                });
-            }
-            const listUrl = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.dataPath}`;
-            const listResponse = await fetch(listUrl, {
-                headers: { 'Authorization': `token ${GITHUB_TOKEN}` }
-            });
-            if (listResponse.ok) {
-                const files = await listResponse.json();
-                for (const file of files) {
-                    if (file.name.startsWith('user_') && file.name.endsWith('.json')) {
-                        const userData = await readGitHubFile(`${CONFIG.dataPath}${file.name}`, GITHUB_TOKEN);
-                        if (userData && userData.id === userId) {
-                            return new Response(JSON.stringify({
-                                user: {
-                                    id: userData.id,
-                                    username: userData.username,
-                                    avatar: userData.avatar
-                                }
-                            }), {
-                                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-                            });
-                        }
-                    }
-                }
-            }
-            return new Response(JSON.stringify({ user: null }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
         }
