@@ -12,32 +12,43 @@ async function init() {
     // 如果在 dashboard 页面，检查登录状态
     if (window.location.pathname === '/dashboard.html') {
         if (!currentUser) {
+            console.log('未登录，跳转到登录页');
             window.location.href = '/login.html';
-        } else {
-            displayUsername();
+            return;
         }
+        displayUsername();
     }
 }
 
 // 检查登录状态
 async function checkLogin() {
     const token = localStorage.getItem('hedwig_token');
+    console.log('Token:', token ? '存在' : '不存在');
+    
     if (!token) return false;
     
     try {
         const response = await fetch('/api/current-user', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
+        
+        console.log('API 响应状态:', response.status);
         const data = await response.json();
-        if (data.user) {
+        console.log('API 返回数据:', data);
+        
+        if (data && data.user) {
             currentUser = data.user;
+            console.log('用户已登录:', currentUser.username);
             return true;
         } else {
+            // Token 无效，清除
+            console.log('Token 无效，清除');
             localStorage.removeItem('hedwig_token');
             localStorage.removeItem('hedwig_user');
             return false;
         }
     } catch (error) {
+        console.error('检查登录失败:', error);
         return false;
     }
 }
@@ -139,18 +150,22 @@ async function handleLogin(e) {
     }
     
     try {
+        console.log('开始登录请求...');
         const response = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
         
+        console.log('登录响应状态:', response.status);
         const data = await response.json();
+        console.log('登录响应数据:', data);
         
         if (response.ok && data.success) {
             // 保存登录信息
             localStorage.setItem('hedwig_token', data.token);
             localStorage.setItem('hedwig_user', JSON.stringify(data.user));
+            console.log('Token 已保存，准备跳转到 dashboard');
             // 跳转到控制台
             window.location.href = '/dashboard.html';
         } else {
@@ -223,6 +238,7 @@ function displayUsername() {
 
 // 页面加载时运行
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('页面加载完成');
     init();
 });
 
