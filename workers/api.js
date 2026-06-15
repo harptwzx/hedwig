@@ -85,10 +85,10 @@ function generateSessionId() {
     return crypto.randomUUID();
 }
 
-// 会话存储（内存中）
+// 会话存储
 let sessions = new Map();
 
-// 清理过期会话（每小时运行一次）
+// 清理过期会话
 setInterval(() => {
     const now = Date.now();
     for (const [sid, session] of sessions.entries()) {
@@ -139,7 +139,7 @@ export default {
             return `session_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
         };
         
-        // 静态文件
+        // ========== 静态文件 ==========
         if (path === '/' || path === '/index.html') {
             const res = await serveStaticFile('/index.html');
             if (res) return res;
@@ -165,7 +165,7 @@ export default {
             if (res) return res;
         }
         
-        // 注册入口
+        // ========== 注册入口 ==========
         if (path === '/auth/register') {
             const username = url.searchParams.get('username');
             const password = url.searchParams.get('password');
@@ -179,7 +179,7 @@ export default {
             return Response.redirect(authUrl, 302);
         }
         
-        // 登录入口
+        // ========== 登录入口 ==========
         if (path === '/auth/login') {
             const stateData = { type: 'login' };
             const state = btoa(JSON.stringify(stateData));
@@ -188,7 +188,7 @@ export default {
             return Response.redirect(authUrl, 302);
         }
         
-        // GitHub 回调
+        // ========== GitHub 回调 ==========
         if (path === '/auth/callback') {
             const code = url.searchParams.get('code');
             const stateParam = url.searchParams.get('state');
@@ -293,7 +293,6 @@ export default {
                     expires: Date.now() + 7 * 24 * 60 * 60 * 1000
                 });
                 
-                // 设置 Cookie 并跳转
                 const response = Response.redirect(`${CONFIG.domain}/dashboard.html`, 302);
                 response.headers.set('Set-Cookie', setSessionCookie(sessionId));
                 return response;
@@ -301,7 +300,7 @@ export default {
             return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);
         }
         
-        // 本地登录 API
+        // ========== 本地登录 API ==========
         if (path === '/api/login' && request.method === 'POST') {
             try {
                 const { username, password } = await request.json();
@@ -343,7 +342,7 @@ export default {
             }
         }
         
-        // 获取当前用户（通过 Cookie）
+        // ========== 获取当前用户 ==========
         if (path === '/api/current-user' && request.method === 'GET') {
             const sessionId = getSessionId(request);
             
@@ -370,7 +369,7 @@ export default {
             }), { headers: { 'Content-Type': 'application/json' } });
         }
         
-        // 退出登录
+        // ========== 退出登录 ==========
         if (path === '/api/logout' && request.method === 'POST') {
             const sessionId = getSessionId(request);
             if (sessionId) {
