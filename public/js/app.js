@@ -8,12 +8,22 @@ async function init() {
     renderAuthButtons();
     initForms();
     handleUrlParams();
+    
+    // 如果在 dashboard 页面，检查登录状态
+    if (window.location.pathname === '/dashboard.html') {
+        if (!currentUser) {
+            window.location.href = '/login.html';
+        } else {
+            displayUsername();
+        }
+    }
 }
 
 // 检查登录状态
 async function checkLogin() {
     const token = localStorage.getItem('hedwig_token');
     if (!token) return false;
+    
     try {
         const response = await fetch('/api/current-user', {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -36,12 +46,13 @@ async function checkLogin() {
 function renderNav() {
     const navLinks = document.getElementById('navLinks');
     if (!navLinks) return;
+    
     if (currentUser) {
         navLinks.innerHTML = `
             <span class="user-info">
-                ${currentUser.username}
+                欢迎, ${currentUser.username}
             </span>
-            <button onclick="logout()">退出</button>
+            <button onclick="logout()">退出登录</button>
         `;
     } else {
         navLinks.innerHTML = `
@@ -55,6 +66,7 @@ function renderNav() {
 function renderAuthButtons() {
     const authButtons = document.getElementById('authButtons');
     if (!authButtons) return;
+    
     if (currentUser) {
         authButtons.innerHTML = `<a href="/dashboard.html" class="btn-primary">进入控制台</a>`;
     } else {
@@ -65,13 +77,15 @@ function renderAuthButtons() {
     }
 }
 
-// 处理 URL 参数
+// 处理 URL 参数（注册成功/失败消息）
 function handleUrlParams() {
     const urlParams = new URLSearchParams(window.location.search);
     const success = urlParams.get('success');
     const error = urlParams.get('error');
     const messageEl = document.getElementById('message');
+    
     if (!messageEl) return;
+    
     if (success === '1') {
         messageEl.textContent = '注册成功！正在跳转登录页...';
         messageEl.className = 'message success';
@@ -104,84 +118,99 @@ function initForms() {
     if (loginForm) {
         loginForm.addEventListener('submit', handleLogin);
     }
+    
     const registerForm = document.getElementById('registerForm');
     if (registerForm) {
         registerForm.addEventListener('submit', handleRegister);
     }
 }
 
-// 处理登录
+// 处理本地登录
 async function handleLogin(e) {
     e.preventDefault();
+    
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
     const messageEl = document.getElementById('message');
+    
     if (!username || !password) {
         showMessage(messageEl, '用户名和密码不能为空', 'error');
         return;
     }
+    
     try {
         const response = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
+        
         const data = await response.json();
-        if (response.ok) {
+        
+        if (response.ok && data.success) {
+            // 保存登录信息
             localStorage.setItem('hedwig_token', data.token);
             localStorage.setItem('hedwig_user', JSON.stringify(data.user));
+            // 跳转到控制台
             window.location.href = '/dashboard.html';
         } else {
             showMessage(messageEl, data.error || '登录失败', 'error');
         }
     } catch (error) {
+        console.error('登录错误:', error);
         showMessage(messageEl, '网络错误，请重试', 'error');
     }
 }
 
-// 处理注册
-async function handleRegister(e) {
+// 处理注册（跳转到 GitHub）
+function handleRegister(e) {
     e.preventDefault();
+    
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
     const confirmPassword = document.getElementById('confirmPassword').value;
     const messageEl = document.getElementById('message');
+    
     if (!username || !password) {
         showMessage(messageEl, '用户名和密码不能为空', 'error');
         return;
     }
+    
     if (password.length < 6) {
         showMessage(messageEl, '密码长度不能少于6位', 'error');
         return;
     }
+    
     if (password !== confirmPassword) {
         showMessage(messageEl, '两次输入的密码不一致', 'error');
         return;
     }
+    
+    // 跳转到注册入口
     window.location.href = `/auth/register?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
 }
 
+// 显示消息
 function showMessage(el, text, type) {
     if (!el) return;
     el.textContent = text;
     el.className = `message ${type}`;
     el.style.display = 'block';
+    
+    // 3秒后自动隐藏
+    setTimeout(() => {
+        if (el.style.display === 'block') {
+            el.style.display = 'none';
+        }
+    }, 3000);
 }
 
 // 退出登录
 function logout() {
     localStorage.removeItem('hedwig_token');
     localStorage.removeItem('hedwig_user');
+    currentUser = null;
     window.location.href = '/';
-}
-
-// 检查登录状态（用于需要登录的页面）
-function checkAuth() {
-    if (!currentUser) {
-        window.location.href = '/login.html';
-        return false;
-    }
-    return true;
 }
 
 // 显示用户名
@@ -193,13 +222,9 @@ function displayUsername() {
 }
 
 // 页面加载时运行
-document.addEventListener('DOMContentLoaded', async () => {
-    await init();
-    if (window.location.pathname === '/dashboard.html') {
-        if (checkAuth()) {
-            displayUsername();
-        }
-    }
+document.addEventListener('DOMContentLoaded', () => {
+    init();
 });
 
+// 暴露全局函数供 HTML 调用
 window.logout = logout;
