@@ -3,19 +3,24 @@ let currentUser = null;
 
 // 初始化
 async function init() {
+    console.log('[Init] 开始初始化');
     await checkLogin();
+    console.log('[Init] 登录状态:', currentUser ? '已登录' : '未登录');
+    
     renderNav();
     renderAuthButtons();
     initForms();
     handleUrlParams();
     
-    // 如果在 dashboard 页面，检查登录状态
+    // 如果在 dashboard 页面
     if (window.location.pathname === '/dashboard.html') {
+        console.log('[Init] 当前在 dashboard 页面');
         if (!currentUser) {
-            console.log('未登录，跳转到登录页');
+            console.log('[Init] 未登录，跳转到登录页');
             window.location.href = '/login.html';
             return;
         }
+        console.log('[Init] 已登录，显示用户名');
         displayUsername();
     }
 }
@@ -23,32 +28,32 @@ async function init() {
 // 检查登录状态
 async function checkLogin() {
     const token = localStorage.getItem('hedwig_token');
-    console.log('Token:', token ? '存在' : '不存在');
+    console.log('[CheckLogin] localStorage 中的 token:', token ? token.substring(0, 20) + '...' : '不存在');
     
     if (!token) return false;
     
     try {
+        console.log('[CheckLogin] 请求 /api/current-user');
         const response = await fetch('/api/current-user', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         
-        console.log('API 响应状态:', response.status);
+        console.log('[CheckLogin] 响应状态:', response.status);
         const data = await response.json();
-        console.log('API 返回数据:', data);
+        console.log('[CheckLogin] 响应数据:', data);
         
-        if (data && data.user) {
+        if (data && data.user && data.user.username) {
             currentUser = data.user;
-            console.log('用户已登录:', currentUser.username);
+            console.log('[CheckLogin] 登录成功，用户:', currentUser.username);
             return true;
         } else {
-            // Token 无效，清除
-            console.log('Token 无效，清除');
+            console.log('[CheckLogin] Token 无效，清除');
             localStorage.removeItem('hedwig_token');
             localStorage.removeItem('hedwig_user');
             return false;
         }
     } catch (error) {
-        console.error('检查登录失败:', error);
+        console.error('[CheckLogin] 请求失败:', error);
         return false;
     }
 }
@@ -88,7 +93,7 @@ function renderAuthButtons() {
     }
 }
 
-// 处理 URL 参数（注册成功/失败消息）
+// 处理 URL 参数
 function handleUrlParams() {
     const urlParams = new URLSearchParams(window.location.search);
     const success = urlParams.get('success');
@@ -144,40 +149,43 @@ async function handleLogin(e) {
     const password = document.getElementById('password').value;
     const messageEl = document.getElementById('message');
     
+    console.log('[Login] 用户名:', username);
+    
     if (!username || !password) {
         showMessage(messageEl, '用户名和密码不能为空', 'error');
         return;
     }
     
     try {
-        console.log('开始登录请求...');
+        console.log('[Login] 发送登录请求');
         const response = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
         
-        console.log('登录响应状态:', response.status);
+        console.log('[Login] 响应状态:', response.status);
         const data = await response.json();
-        console.log('登录响应数据:', data);
+        console.log('[Login] 响应数据:', data);
         
         if (response.ok && data.success) {
             // 保存登录信息
             localStorage.setItem('hedwig_token', data.token);
             localStorage.setItem('hedwig_user', JSON.stringify(data.user));
-            console.log('Token 已保存，准备跳转到 dashboard');
+            console.log('[Login] Token 已保存');
+            console.log('[Login] 即将跳转到 dashboard');
             // 跳转到控制台
             window.location.href = '/dashboard.html';
         } else {
             showMessage(messageEl, data.error || '登录失败', 'error');
         }
     } catch (error) {
-        console.error('登录错误:', error);
+        console.error('[Login] 错误:', error);
         showMessage(messageEl, '网络错误，请重试', 'error');
     }
 }
 
-// 处理注册（跳转到 GitHub）
+// 处理注册
 function handleRegister(e) {
     e.preventDefault();
     
@@ -212,7 +220,6 @@ function showMessage(el, text, type) {
     el.className = `message ${type}`;
     el.style.display = 'block';
     
-    // 3秒后自动隐藏
     setTimeout(() => {
         if (el.style.display === 'block') {
             el.style.display = 'none';
@@ -222,6 +229,7 @@ function showMessage(el, text, type) {
 
 // 退出登录
 function logout() {
+    console.log('[Logout] 退出登录');
     localStorage.removeItem('hedwig_token');
     localStorage.removeItem('hedwig_user');
     currentUser = null;
@@ -238,9 +246,9 @@ function displayUsername() {
 
 // 页面加载时运行
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('页面加载完成');
+    console.log('[DOM] 页面加载完成');
     init();
 });
 
-// 暴露全局函数供 HTML 调用
+// 暴露全局函数
 window.logout = logout;
