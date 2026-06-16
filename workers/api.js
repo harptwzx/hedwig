@@ -11,10 +11,7 @@ async function readGitHubFile(filePath, token) {
     const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${filePath}`;
     try {
         const response = await fetch(url, {
-            headers: {
-                'Authorization': `token ${token}`,
-                'User-Agent': 'Hedwig-Worker'
-            }
+            headers: { 'Authorization': `token ${token}`, 'User-Agent': 'Hedwig-Worker' }
         });
         if (response.status === 404) return null;
         if (!response.ok) return null;
@@ -32,10 +29,7 @@ async function writeGitHubFile(filePath, content, commitMessage, token) {
     try {
         let sha = null;
         const checkResponse = await fetch(url, {
-            headers: {
-                'Authorization': `token ${token}`,
-                'User-Agent': 'Hedwig-Worker'
-            }
+            headers: { 'Authorization': `token ${token}`, 'User-Agent': 'Hedwig-Worker' }
         });
         if (checkResponse.ok) {
             const existingData = await checkResponse.json();
@@ -72,9 +66,7 @@ async function serveStaticFile(path) {
             let contentType = 'text/html';
             if (path.endsWith('.css')) contentType = 'text/css';
             if (path.endsWith('.js')) contentType = 'application/javascript';
-            return new Response(content, {
-                headers: { 'Content-Type': contentType }
-            });
+            return new Response(content, { headers: { 'Content-Type': contentType } });
         }
     } catch (error) {}
     return null;
@@ -121,7 +113,7 @@ export default {
             });
         }
         
-        // 获取 Cookie 中的 session_id
+        // Cookie 处理函数
         const getSessionId = (request) => {
             const cookie = request.headers.get('Cookie');
             if (!cookie) return null;
@@ -129,12 +121,10 @@ export default {
             return match ? match[1] : null;
         };
         
-        // 设置 Cookie
         const setSessionCookie = (sessionId) => {
             return `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`;
         };
         
-        // 清除 Cookie
         const clearSessionCookie = () => {
             return `session_id=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
         };
@@ -221,18 +211,12 @@ export default {
                 return Response.redirect(`${CONFIG.domain}/login.html?error=1`, 302);
             }
             const userResponse = await fetch('https://api.github.com/user', {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'User-Agent': 'Hedwig-Worker'
-                }
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
             });
             const githubUser = await userResponse.json();
             const githubId = githubUser.id.toString();
             const emailResponse = await fetch('https://api.github.com/user/emails', {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'User-Agent': 'Hedwig-Worker'
-                }
+                headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
             });
             const emails = await emailResponse.json();
             const primaryEmail = emails.find(e => e.primary)?.email || emails[0]?.email || '';
@@ -284,7 +268,6 @@ export default {
                     return Response.redirect(`${CONFIG.domain}/login.html?error=3`, 302);
                 }
                 
-                // 创建 Session
                 const sessionId = generateSessionId();
                 sessions.set(sessionId, {
                     userId: userData.id,
@@ -300,20 +283,31 @@ export default {
             return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);
         }
         
-        // ========== 本地登录 API ==========
+        // ========== 本地登录 API - 关键修复 ==========
         if (path === '/api/login' && request.method === 'POST') {
             try {
                 const { username, password } = await request.json();
+                console.log('[登录] 用户名:', username);
+                
                 if (!username || !password) {
-                    return new Response(JSON.stringify({ error: '用户名和密码不能为空' }), {
+                    return new Response(JSON.stringify({ 
+                        success: false, 
+                        error: '用户名和密码不能为空' 
+                    }), {
                         status: 400,
                         headers: { 'Content-Type': 'application/json' }
                     });
                 }
+                
                 const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
                 const userData = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                console.log('[登录] 用户数据:', userData ? '找到' : '未找到');
+                
                 if (!userData || userData.password !== btoa(password)) {
-                    return new Response(JSON.stringify({ error: '用户名或密码错误' }), {
+                    return new Response(JSON.stringify({ 
+                        success: false, 
+                        error: '用户名或密码错误' 
+                    }), {
                         status: 401,
                         headers: { 'Content-Type': 'application/json' }
                     });
@@ -327,15 +321,26 @@ export default {
                     avatar: userData.avatar,
                     expires: Date.now() + 7 * 24 * 60 * 60 * 1000
                 });
+                console.log('[登录] Session 已创建:', sessionId);
                 
-                const response = new Response(JSON.stringify({
+                // 返回正确的响应
+                const responseData = {
                     success: true,
                     redirect: '/dashboard.html'
-                }), { headers: { 'Content-Type': 'application/json' } });
+                };
+                console.log('[登录] 返回数据:', responseData);
+                
+                const response = new Response(JSON.stringify(responseData), {
+                    headers: { 'Content-Type': 'application/json' }
+                });
                 response.headers.set('Set-Cookie', setSessionCookie(sessionId));
                 return response;
             } catch (error) {
-                return new Response(JSON.stringify({ error: '服务器错误' }), {
+                console.error('[登录] 错误:', error);
+                return new Response(JSON.stringify({ 
+                    success: false, 
+                    error: '服务器错误' 
+                }), {
                     status: 500,
                     headers: { 'Content-Type': 'application/json' }
                 });
