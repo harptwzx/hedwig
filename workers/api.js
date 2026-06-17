@@ -1,4 +1,7 @@
-// ========== 安全实用版 api.js - 版本号机制，不绑定设备 ==========
+// ============================================
+// Hedwig - 安全实用版 Session 方案
+// 所有数据存 GitHub，不绑定设备，版本号控制
+// ============================================
 
 const CONFIG = {
     owner: 'harptwzx',
@@ -8,7 +11,138 @@ const CONFIG = {
     domain: 'https://hedwig.eu.org'
 };
 
-// ... 工具函数保持不变（sha256, hashPassword, verifyPassword, generateSessionId, generateSalt, corsHeaders, readGitHubFile, writeGitHubFile, deleteGitHubFile, getSessionId, setSessionCookie, clearSessionCookie, serveStaticFile）...
+// ========== 工具函数 ==========
+
+function generateSalt() {
+    const arr = new Uint8Array(16);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function sha256(text) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashPassword(password, salt) {
+    return await sha256(password + salt);
+}
+
+async function verifyPassword(password, storedHash, salt) {
+    const hash = await hashPassword(password, salt);
+    return hash === storedHash;
+}
+
+function generateSessionId() {
+    return crypto.randomUUID();
+}
+
+function corsHeaders() {
+    return {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Credentials': 'true'
+    };
+}
+
+// ========== GitHub 文件操作 ==========
+
+async function readGitHubFile(filePath, token) {
+    const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${filePath}`;
+    try {
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `token ${token}`,
+                'User-Agent': 'Hedwig-Worker'
+            }
+        });
+        if (response.status === 404) return null;
+        if (!response.ok) {
+            console.error(`[GitHub] 读取失败 ${filePath}: ${response.status}`);
+            return null;
+        }
+        const data = await response.json();
+        const content = atob(data.content);
+        return { content: JSON.parse(content), sha: data.sha };
+    } catch (error) {
+        console.error(`[GitHub] 读取错误 ${filePath}:`, error);
+        return null;
+    }
+}
+
+async function writeGitHubFile(filePath, content, commitMessage, token, existingSha) {
+    const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${filePath}`;
+    try {
+        let sha = existingSha;
+        if (!sha) {
+            const checkResponse = await fetch(url, {
+                headers: {
+                    'Authorization': `token ${token}`,
+                    'User-Agent': 'Hedwig-Worker'
+                }
+            });
+            if (checkResponse.ok) {
+                const existingData = await checkResponse.json();
+                sha = existingData.sha;
+            }
+        }
+        const contentString = JSON.stringify(content, null, 2);
+        const encodedContent = btoa(unescape(encodeURIComponent(contentString)));
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json',
+                'User-Agent': 'Hedwig-Worker'
+            },
+            body: JSON.stringify({
+                message: commitMessage,
+                content: encodedContent,
+                sha: sha
+            })
+        });
+        if (!response.ok) {
+            console.error(`[GitHub] 写入失败 ${filePath}: ${response.status}`);
+        }
+        return response.ok;
+    } catch (error) {
+        console.error(`[GitHub] 写入错误 ${filePath}:`, error);
+        return false;
+    }
+}
+
+async function deleteGitHubFile(filePath, token) {
+    const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${filePath}`;
+    try {
+        const checkResponse = await fetch(url, {
+            headers: {
+                'Authorization': `token ${token}`,
+                'User-Agent': 'Hedwig-Worker'
+            }
+        });
+        if (!checkResponse.ok) return false;
+        const existingData = await checkResponse.json();
+        const response = await fetch(url, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `token ${token}`,
+                'Content-Type': 'application/json',
+                'User-Agent': 'Hedwig-Worker'
+            },
+            body: JSON.stringify({
+                message: `删除: ${filePath}`,
+                sha: existingData.sha
+            })
+        });
+        return response.ok;
+    } catch (error) {
+        return false;
+    }
+}
 
 // ========== Session 管理（存 GitHub，不绑定设备）==========
 
@@ -16,7 +150,7 @@ async function getSession(env, sessionId) {
     const filePath = `${CONFIG.sessionsPath}${sessionId}.json`;
     const result = await readGitHubFile(filePath, env.GITHUB_TOKEN);
     if (!result) return null;
-    
+
     const session = result.content;
     if (session.expires < Date.now()) {
         await deleteGitHubFile(filePath, env.GITHUB_TOKEN);
@@ -35,15 +169,18 @@ async function deleteSession(env, sessionId) {
     await deleteGitHubFile(filePath, env.GITHUB_TOKEN);
 }
 
-// 清理某用户的所有 Session（改密码时调用）
+// 清理某用户的所有 Session
 async function cleanupUserSessions(env, username) {
     try {
         const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.sessionsPath}`;
         const response = await fetch(url, {
-            headers: { 'Authorization': `token ${env.GITHUB_TOKEN}`, 'User-Agent': 'Hedwig-Worker' }
+            headers: {
+                'Authorization': `token ${env.GITHUB_TOKEN}`,
+                'User-Agent': 'Hedwig-Worker'
+            }
         });
         if (!response.ok) return;
-        
+
         const files = await response.json();
         for (const file of files) {
             if (file.type !== 'file' || !file.name.endsWith('.json')) continue;
@@ -64,10 +201,13 @@ async function cleanupSessions(env) {
     try {
         const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.sessionsPath}`;
         const response = await fetch(url, {
-            headers: { 'Authorization': `token ${env.GITHUB_TOKEN}`, 'User-Agent': 'Hedwig-Worker' }
+            headers: {
+                'Authorization': `token ${env.GITHUB_TOKEN}`,
+                'User-Agent': 'Hedwig-Worker'
+            }
         });
         if (!response.ok) return;
-        
+
         const files = await response.json();
         const now = Date.now();
         for (const file of files) {
@@ -83,17 +223,59 @@ async function cleanupSessions(env) {
     } catch (error) {}
 }
 
+// ========== Cookie 处理 ==========
+
+function getSessionId(request) {
+    const cookie = request.headers.get('Cookie');
+    if (!cookie) return null;
+    const match = cookie.match(/session_id=([^;]+)/);
+    return match ? match[1] : null;
+}
+
+function setSessionCookie(sessionId) {
+    return `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800; Secure`;
+}
+
+function clearSessionCookie() {
+    return `session_id=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure`;
+}
+
+// ========== 静态文件服务 ==========
+
+async function serveStaticFile(path) {
+    const url = `https://raw.githubusercontent.com/${CONFIG.owner}/${CONFIG.repo}/main/public${path}`;
+    try {
+        const response = await fetch(url);
+        if (response.ok) {
+            const content = await response.text();
+            let contentType = 'text/html';
+            if (path.endsWith('.css')) contentType = 'text/css';
+            if (path.endsWith('.js')) contentType = 'application/javascript';
+            if (path.endsWith('.png')) contentType = 'image/png';
+            if (path.endsWith('.jpg') || path.endsWith('.jpeg')) contentType = 'image/jpeg';
+            if (path.endsWith('.svg')) contentType = 'image/svg+xml';
+            return new Response(content, { headers: { 'Content-Type': contentType } });
+        }
+    } catch (error) {}
+    return null;
+}
+
+// ========== 主入口 ==========
+
 export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
         const path = url.pathname;
 
+        // 环境变量检查
         if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.GITHUB_TOKEN) {
             return new Response('服务器配置错误', { status: 500 });
         }
 
+        // 概率清理过期 Session
         ctx.waitUntil(cleanupSessions(env));
 
+        // CORS 预检
         if (request.method === 'OPTIONS') {
             return new Response(null, { headers: corsHeaders() });
         }
@@ -108,7 +290,7 @@ export default {
             '/css/style.css': '/css/style.css',
             '/js/app.js': '/js/app.js'
         };
-        
+
         if (staticPaths[path]) {
             const res = await serveStaticFile(staticPaths[path]);
             if (res) return res;
@@ -210,7 +392,7 @@ export default {
                     username: username,
                     passwordHash: passwordHash,
                     salt: salt,
-                    tokenVersion: 1,  // ← 初始版本
+                    tokenVersion: 1,
                     githubId: githubId,
                     githubLogin: githubUser.login,
                     email: primaryEmail,
@@ -247,7 +429,7 @@ export default {
                     userId: userData.id,
                     username: userData.username,
                     avatar: userData.avatar,
-                    tokenVersion: userData.tokenVersion || 1,  // ← 记录版本
+                    tokenVersion: userData.tokenVersion || 1,
                     expires: Date.now() + 7 * 24 * 60 * 60 * 1000
                 };
 
@@ -290,7 +472,7 @@ export default {
                 }
 
                 const userData = userResult.content;
-                
+
                 let passwordValid = false;
                 if (userData.passwordHash && userData.salt) {
                     passwordValid = await verifyPassword(password, userData.passwordHash, userData.salt);
@@ -313,7 +495,7 @@ export default {
                     userId: userData.id,
                     username: userData.username,
                     avatar: userData.avatar,
-                    tokenVersion: userData.tokenVersion || 1,  // ← 记录版本
+                    tokenVersion: userData.tokenVersion || 1,
                     expires: Date.now() + 7 * 24 * 60 * 60 * 1000
                 };
 
@@ -365,7 +547,7 @@ export default {
             // 查用户最新版本号
             const userFilePath = `${CONFIG.dataPath}user_${session.username}.json`;
             const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
-            
+
             if (!userResult) {
                 await deleteSession(env, sessionId);
                 return new Response(JSON.stringify({ user: null }), {
@@ -444,8 +626,7 @@ export default {
                 }
 
                 const userData = userResult.content;
-                
-                // 验证旧密码
+
                 let oldValid = false;
                 if (userData.passwordHash && userData.salt) {
                     oldValid = await verifyPassword(oldPassword, userData.passwordHash, userData.salt);
@@ -467,7 +648,7 @@ export default {
                 userData.tokenVersion = (userData.tokenVersion || 1) + 1;
 
                 await writeGitHubFile(userFilePath, userData, '修改密码', env.GITHUB_TOKEN, userResult.sha);
-                
+
                 // 清理该用户所有 Session
                 await cleanupUserSessions(env, userData.username);
 
