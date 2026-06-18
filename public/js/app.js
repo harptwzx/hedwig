@@ -297,7 +297,7 @@ async function loadMessages() {
         const messages = data.messages || [];
 
         if (messages.length === 0) {
-            msgList.innerHTML = '<div class="no-messages">还没有留言，来写第一条吧 ✨</div>';
+            msgList.innerHTML = '<div class="no-messages">还没有留言，来写第一条吧 </div>';
             return;
         }
 
