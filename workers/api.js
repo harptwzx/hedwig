@@ -1,6 +1,7 @@
 // ============================================
 // Hedwig - 安全实用版 Session 方案
 // 所有数据存 GitHub，不绑定设备，版本号控制
+// 懒清理：过期 Session 只在读取时删除
 // ============================================
 
 const CONFIG = {
@@ -144,7 +145,7 @@ async function deleteGitHubFile(filePath, token) {
     }
 }
 
-// ========== Session 管理（存 GitHub，不绑定设备）==========
+// ========== Session 管理（存 GitHub，懒清理）==========
 
 async function getSession(env, sessionId) {
     const filePath = `${CONFIG.sessionsPath}${sessionId}.json`;
@@ -152,6 +153,7 @@ async function getSession(env, sessionId) {
     if (!result) return null;
 
     const session = result.content;
+    // 过期了？立刻删除（懒清理）
     if (session.expires < Date.now()) {
         await deleteGitHubFile(filePath, env.GITHUB_TOKEN);
         return null;
@@ -169,7 +171,7 @@ async function deleteSession(env, sessionId) {
     await deleteGitHubFile(filePath, env.GITHUB_TOKEN);
 }
 
-// 清理某用户的所有 Session
+// 清理某用户的所有 Session（改密码时调用）
 async function cleanupUserSessions(env, username) {
     try {
         const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.sessionsPath}`;
@@ -188,34 +190,6 @@ async function cleanupUserSessions(env, username) {
                 const content = atob(file.content || '');
                 const session = JSON.parse(content);
                 if (session.username === username) {
-                    await deleteGitHubFile(`${CONFIG.sessionsPath}${file.name}`, env.GITHUB_TOKEN);
-                }
-            } catch (e) {}
-        }
-    } catch (error) {}
-}
-
-// 概率清理过期 Session
-async function cleanupSessions(env) {
-    if (Math.random() > 0.1) return;
-    try {
-        const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.sessionsPath}`;
-        const response = await fetch(url, {
-            headers: {
-                'Authorization': `token ${env.GITHUB_TOKEN}`,
-                'User-Agent': 'Hedwig-Worker'
-            }
-        });
-        if (!response.ok) return;
-
-        const files = await response.json();
-        const now = Date.now();
-        for (const file of files) {
-            if (file.type !== 'file' || !file.name.endsWith('.json')) continue;
-            try {
-                const content = atob(file.content || '');
-                const session = JSON.parse(content);
-                if (session.expires < now) {
                     await deleteGitHubFile(`${CONFIG.sessionsPath}${file.name}`, env.GITHUB_TOKEN);
                 }
             } catch (e) {}
@@ -271,9 +245,6 @@ export default {
         if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.GITHUB_TOKEN) {
             return new Response('服务器配置错误', { status: 500 });
         }
-
-        // 概率清理过期 Session
-        ctx.waitUntil(cleanupSessions(env));
 
         // CORS 预检
         if (request.method === 'OPTIONS') {
