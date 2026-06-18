@@ -191,8 +191,6 @@ function handleUrlParams() {
 function initForms() {
     const loginForm = document.getElementById('loginForm');
     if (loginForm) loginForm.addEventListener('submit', handleLogin);
-    const registerForm = document.getElementById('registerForm');
-    if (registerForm) registerForm.addEventListener('submit', handleRegister);
 }
 
 async function handleLogin(e) {
@@ -219,27 +217,6 @@ async function handleLogin(e) {
     } catch (error) {
         showMessage(messageEl, '网络错误，请重试', 'error');
     }
-}
-
-function handleRegister(e) {
-    e.preventDefault();
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('password').value;
-    const confirmPassword = document.getElementById('confirmPassword').value;
-    const messageEl = document.getElementById('message');
-    if (!username || !password) {
-        showMessage(messageEl, '用户名和密码不能为空', 'error');
-        return;
-    }
-    if (password.length < 6) {
-        showMessage(messageEl, '密码长度不能少于6位', 'error');
-        return;
-    }
-    if (password !== confirmPassword) {
-        showMessage(messageEl, '两次输入的密码不一致', 'error');
-        return;
-    }
-    window.location.href = `/auth/register?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
 }
 
 function showMessage(el, text, type) {

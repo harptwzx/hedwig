@@ -127,6 +127,62 @@ main {
     background: #444;
 }
 
+.btn-github {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 12px 24px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid #30363d;
+    background: #21262d;
+    color: #c9d1d9;
+    transition: background 0.2s, border-color 0.2s;
+    width: 100%;
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.btn-github:hover {
+    background: #30363d;
+    border-color: #8b949e;
+    color: #f0f6fc;
+}
+
+.btn-github svg {
+    flex-shrink: 0;
+}
+
+.btn-github {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 30px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 16px;
+    cursor: pointer;
+    border: 1px solid #30363d;
+    background: #21262d;
+    color: #c9d1d9;
+    font-weight: 500;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.btn-github:hover {
+    background: #30363d;
+    border-color: #8b949e;
+    color: #f0f6fc;
+}
+
+.btn-github svg {
+    fill: currentColor;
+}
+
 form {
     max-width: 400px;
     margin: 0 auto;

@@ -271,12 +271,7 @@ export default {
         }
 
         if (path === '/auth/register') {
-            const username = url.searchParams.get('username');
-            const password = url.searchParams.get('password');
-            if (!username || !password) {
-                return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
-            }
-            const stateData = { username, password, type: 'register' };
+            const stateData = { type: 'register' };
             const state = btoa(JSON.stringify(stateData));
             const redirectUri = `${CONFIG.domain}/auth/callback`;
             const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
@@ -337,10 +332,7 @@ export default {
             const primaryEmail = emails.find(e => e.primary)?.email || emails[0]?.email || '';
 
             if (state.type === 'register') {
-                const { username, password } = state;
-                if (!username || !password) {
-                    return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
-                }
+                const username = githubUser.login;
 
                 const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
                 const existingMapping = await readGitHubFile(githubMappingPath, env.GITHUB_TOKEN);
@@ -355,7 +347,8 @@ export default {
                 }
 
                 const salt = generateSalt();
-                const passwordHash = await hashPassword(password, salt);
+                const randomPassword = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
+                const passwordHash = await hashPassword(randomPassword, salt);
 
                 const userData = {
                     id: Date.now().toString(),
