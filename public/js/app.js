@@ -28,7 +28,7 @@ function showCookieConsent() {
                 text-align: center; border: 1px solid #333;
             ">
                 <div style="font-size: 48px; margin-bottom: 15px;">🦉</div>
-                <h2 style="margin: 0 0 15px 0; color: #e94560;">Cookie 使用提示</h2>
+                <h2 style="margin: 0 0 15px 0; color: #7c8cff;">Cookie 使用提示</h2>
                 <p style="margin: 0 0 25px 0; line-height: 1.6; font-size: 14px; color: #aaa;">
                     本网站使用 Cookie 来保存您的登录状态。<br>
                     没有 Cookie，您将无法登录和使用个性化功能。
@@ -68,7 +68,7 @@ function showCookieConsent() {
             ">
                 <div style="text-align: center; color: #666;">
                     <div style="font-size: 64px; margin-bottom: 20px;">🦉</div>
-                    <h1 style="color: #e94560; margin-bottom: 15px;">访问已关闭</h1>
+                    <h1 style="color: #7c8cff; margin-bottom: 15px;">访问已关闭</h1>
                     <p>您拒绝了 Cookie 使用，无法继续访问。</p>
                     <p style="font-size: 13px; margin-top: 20px;">请开启浏览器 Cookie 后刷新页面</p>
                 </div>
@@ -101,7 +101,7 @@ async function init() {
             <div style="
                 position: fixed; top: 0; left: 0; right: 0; bottom: 0;
                 background: #0a0a1a; display: flex; align-items: center; justify-content: center;
-                color: #e94560; text-align: center; padding: 20px;
+                color: #7c8cff; text-align: center; padding: 20px;
             ">
                 <div>
                     <div style="font-size: 64px; margin-bottom: 20px;">🦉</div>
