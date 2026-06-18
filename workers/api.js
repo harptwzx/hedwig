@@ -1,18 +1,11 @@
-// ============================================
-// Hedwig - 安全实用版 Session 方案
-// 所有数据存 GitHub，不绑定设备，版本号控制
-// 懒清理：过期 Session 只在读取时删除
-// ============================================
-
 const CONFIG = {
     owner: 'harptwzx',
     repo: 'hedwig',
     dataPath: 'data/users/',
     sessionsPath: 'data/sessions/',
+    messagesPath: 'data/messages/',
     domain: 'https://hedwig.eu.org'
 };
-
-// ========== 工具函数 ==========
 
 function generateSalt() {
     const arr = new Uint8Array(16);
@@ -41,6 +34,10 @@ function generateSessionId() {
     return crypto.randomUUID();
 }
 
+function generateMessageId() {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
 function corsHeaders() {
     return {
         'Access-Control-Allow-Origin': '*',
@@ -49,8 +46,6 @@ function corsHeaders() {
         'Access-Control-Allow-Credentials': 'true'
     };
 }
-
-// ========== GitHub 文件操作 ==========
 
 async function readGitHubFile(filePath, token) {
     const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${filePath}`;
@@ -62,15 +57,11 @@ async function readGitHubFile(filePath, token) {
             }
         });
         if (response.status === 404) return null;
-        if (!response.ok) {
-            console.error(`[GitHub] 读取失败 ${filePath}: ${response.status}`);
-            return null;
-        }
+        if (!response.ok) return null;
         const data = await response.json();
         const content = atob(data.content);
         return { content: JSON.parse(content), sha: data.sha };
     } catch (error) {
-        console.error(`[GitHub] 读取错误 ${filePath}:`, error);
         return null;
     }
 }
@@ -106,12 +97,8 @@ async function writeGitHubFile(filePath, content, commitMessage, token, existing
                 sha: sha
             })
         });
-        if (!response.ok) {
-            console.error(`[GitHub] 写入失败 ${filePath}: ${response.status}`);
-        }
         return response.ok;
     } catch (error) {
-        console.error(`[GitHub] 写入错误 ${filePath}:`, error);
         return false;
     }
 }
@@ -145,15 +132,11 @@ async function deleteGitHubFile(filePath, token) {
     }
 }
 
-// ========== Session 管理（存 GitHub，懒清理）==========
-
 async function getSession(env, sessionId) {
     const filePath = `${CONFIG.sessionsPath}${sessionId}.json`;
     const result = await readGitHubFile(filePath, env.GITHUB_TOKEN);
     if (!result) return null;
-
     const session = result.content;
-    // 过期了？立刻删除（懒清理）
     if (session.expires < Date.now()) {
         await deleteGitHubFile(filePath, env.GITHUB_TOKEN);
         return null;
@@ -171,7 +154,6 @@ async function deleteSession(env, sessionId) {
     await deleteGitHubFile(filePath, env.GITHUB_TOKEN);
 }
 
-// 清理某用户的所有 Session（改密码时调用）
 async function cleanupUserSessions(env, username) {
     try {
         const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.sessionsPath}`;
@@ -182,7 +164,6 @@ async function cleanupUserSessions(env, username) {
             }
         });
         if (!response.ok) return;
-
         const files = await response.json();
         for (const file of files) {
             if (file.type !== 'file' || !file.name.endsWith('.json')) continue;
@@ -197,7 +178,36 @@ async function cleanupUserSessions(env, username) {
     } catch (error) {}
 }
 
-// ========== Cookie 处理 ==========
+async function getMessages(env) {
+    try {
+        const url = `https://api.github.com/repos/${CONFIG.owner}/${CONFIG.repo}/contents/${CONFIG.messagesPath}`;
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `token ${env.GITHUB_TOKEN}`,
+                'User-Agent': 'Hedwig-Worker'
+            }
+        });
+        if (!response.ok) return [];
+        const files = await response.json();
+        const messages = [];
+        for (const file of files) {
+            if (file.type !== 'file' || !file.name.endsWith('.json')) continue;
+            try {
+                const content = atob(file.content || '');
+                const msg = JSON.parse(content);
+                messages.push(msg);
+            } catch (e) {}
+        }
+        return messages.sort((a, b) => b.timestamp - a.timestamp);
+    } catch (error) {
+        return [];
+    }
+}
+
+async function saveMessage(env, messageData) {
+    const filePath = `${CONFIG.messagesPath}msg_${messageData.id}.json`;
+    return await writeGitHubFile(filePath, messageData, `新留言: ${messageData.id}`, env.GITHUB_TOKEN);
+}
 
 function getSessionId(request) {
     const cookie = request.headers.get('Cookie');
@@ -213,8 +223,6 @@ function setSessionCookie(sessionId) {
 function clearSessionCookie() {
     return `session_id=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure`;
 }
-
-// ========== 静态文件服务 ==========
 
 async function serveStaticFile(path) {
     const url = `https://raw.githubusercontent.com/${CONFIG.owner}/${CONFIG.repo}/main/public${path}`;
@@ -234,24 +242,19 @@ async function serveStaticFile(path) {
     return null;
 }
 
-// ========== 主入口 ==========
-
 export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
         const path = url.pathname;
 
-        // 环境变量检查
         if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.GITHUB_TOKEN) {
             return new Response('服务器配置错误', { status: 500 });
         }
 
-        // CORS 预检
         if (request.method === 'OPTIONS') {
             return new Response(null, { headers: corsHeaders() });
         }
 
-        // ========== 静态文件 ==========
         const staticPaths = {
             '/': '/index.html',
             '/index.html': '/index.html',
@@ -267,7 +270,6 @@ export default {
             if (res) return res;
         }
 
-        // ========== 注册入口 ==========
         if (path === '/auth/register') {
             const username = url.searchParams.get('username');
             const password = url.searchParams.get('password');
@@ -281,7 +283,6 @@ export default {
             return Response.redirect(authUrl, 302);
         }
 
-        // ========== 登录入口（GitHub OAuth）==========
         if (path === '/auth/login') {
             const stateData = { type: 'login' };
             const state = btoa(JSON.stringify(stateData));
@@ -290,7 +291,6 @@ export default {
             return Response.redirect(authUrl, 302);
         }
 
-        // ========== GitHub 回调 ==========
         if (path === '/auth/callback') {
             const code = url.searchParams.get('code');
             const stateParam = url.searchParams.get('state');
@@ -336,7 +336,6 @@ export default {
             const emails = await emailResponse.json();
             const primaryEmail = emails.find(e => e.primary)?.email || emails[0]?.email || '';
 
-            // ===== 注册流程 =====
             if (state.type === 'register') {
                 const { username, password } = state;
                 if (!username || !password) {
@@ -380,7 +379,6 @@ export default {
                 return Response.redirect(`${CONFIG.domain}/login.html?registered=1`, 302);
             }
 
-            // ===== 登录流程（GitHub OAuth）=====
             if (state.type === 'login') {
                 const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
                 const mappingResult = await readGitHubFile(githubMappingPath, env.GITHUB_TOKEN);
@@ -414,7 +412,6 @@ export default {
             return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);
         }
 
-        // ========== 本地登录 API ==========
         if (path === '/api/login' && request.method === 'POST') {
             try {
                 const { username, password } = await request.json();
@@ -494,7 +491,6 @@ export default {
             }
         }
 
-        // ========== 获取当前用户（版本号校验）==========
         if (path === '/api/current-user' && request.method === 'GET') {
             const sessionId = getSessionId(request);
 
@@ -514,8 +510,6 @@ export default {
             }
 
             const session = sessionResult.session;
-
-            // 查用户最新版本号
             const userFilePath = `${CONFIG.dataPath}user_${session.username}.json`;
             const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
 
@@ -528,7 +522,6 @@ export default {
 
             const userData = userResult.content;
 
-            // 版本号校验：改密码后旧 Session 失效
             if (session.tokenVersion !== (userData.tokenVersion || 1)) {
                 await deleteSession(env, sessionId);
                 const response = new Response(JSON.stringify({ user: null }), {
@@ -547,7 +540,6 @@ export default {
             }), { headers: { ...corsHeaders(), 'Content-Type': 'application/json' } });
         }
 
-        // ========== 退出登录 ==========
         if (path === '/api/logout' && request.method === 'POST') {
             const sessionId = getSessionId(request);
             if (sessionId) {
@@ -560,7 +552,6 @@ export default {
             return response;
         }
 
-        // ========== 修改密码（让所有设备退出）==========
         if (path === '/api/change-password' && request.method === 'POST') {
             const sessionId = getSessionId(request);
             if (!sessionId) {
@@ -612,21 +603,67 @@ export default {
                     });
                 }
 
-                // 更新密码，版本号 +1
                 const newSalt = generateSalt();
                 userData.passwordHash = await hashPassword(newPassword, newSalt);
                 userData.salt = newSalt;
                 userData.tokenVersion = (userData.tokenVersion || 1) + 1;
 
                 await writeGitHubFile(userFilePath, userData, '修改密码', env.GITHUB_TOKEN, userResult.sha);
-
-                // 清理该用户所有 Session
                 await cleanupUserSessions(env, userData.username);
 
                 return new Response(JSON.stringify({ success: true }), {
                     headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
                 });
 
+            } catch (error) {
+                return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
+                    status: 500,
+                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                });
+            }
+        }
+
+        if (path === '/api/messages' && request.method === 'GET') {
+            const messages = await getMessages(env);
+            return new Response(JSON.stringify({ messages }), {
+                headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (path === '/api/messages' && request.method === 'POST') {
+            try {
+                const { name, content } = await request.json();
+                if (!content || content.trim().length === 0) {
+                    return new Response(JSON.stringify({ success: false, error: '留言内容不能为空' }), {
+                        status: 400,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+                if (content.length > 500) {
+                    return new Response(JSON.stringify({ success: false, error: '留言内容不能超过500字' }), {
+                        status: 400,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+
+                const messageData = {
+                    id: generateMessageId(),
+                    name: name ? name.trim().substring(0, 30) : '匿名',
+                    content: content.trim(),
+                    timestamp: Date.now()
+                };
+
+                const success = await saveMessage(env, messageData);
+                if (!success) {
+                    return new Response(JSON.stringify({ success: false, error: '保存失败' }), {
+                        status: 500,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+
+                return new Response(JSON.stringify({ success: true, message: messageData }), {
+                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                });
             } catch (error) {
                 return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
                     status: 500,

@@ -7,41 +7,34 @@
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-    <div id="app">
-        <nav class="navbar">
-            <div class="nav-container">
-                <a href="/" class="logo">Hedwig</a>
-                <div class="nav-links" id="navLinks"></div>
+    <nav>
+        <div class="logo"><a href="/">🦉 Hedwig</a></div>
+        <div id="navLinks"></div>
+    </nav>
+
+    <main>
+        <h1>欢迎回来，<span id="username"></span>！</h1>
+        <p>这里是你的个人控制台</p>
+
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">📓</div>
+                <h3>日记</h3>
+                <p>记录你的生活点滴</p>
             </div>
-        </nav>
-        
-        <main class="container">
-            <div class="dashboard">
-                <div class="welcome-card">
-                    <h2>欢迎回来，<span id="username"></span>！</h2>
-                    <p>这里是你的魔法控制台</p>
-                </div>
-                
-                <div class="dashboard-grid">
-                    <div class="dashboard-card">
-                        <h3>魔法日记</h3>
-                        <p>记录你的魔法时刻</p>
-                    </div>
-                    
-                    <div class="dashboard-card">
-                        <h3>我的书库</h3>
-                        <p>管理你的收藏</p>
-                    </div>
-                    
-                    <div class="dashboard-card">
-                        <h3>咒语集</h3>
-                        <p>收集强大的咒语</p>
-                    </div>
-                </div>
+            <div class="feature">
+                <div class="feature-icon">📚</div>
+                <h3>书库</h3>
+                <p>管理你的收藏</p>
             </div>
-        </main>
-    </div>
-    
+            <div class="feature">
+                <div class="feature-icon">⭐</div>
+                <h3>收藏</h3>
+                <p>收集喜欢的事物</p>
+            </div>
+        </div>
+    </main>
+
     <script src="/js/app.js"></script>
 </body>
 </html>
