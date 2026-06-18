@@ -1,16 +1,45 @@
-async function initApp() {
-    await checkLogin();
-    renderNav();
-    renderAuthButtons();
-    initForms();
-    handleUrlParams();
-    initMessageBoard();
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hedwig</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav>
+        <div class="logo">Hedwig</div>
+        <div id="navLinks"></div>
+    </nav>
 
-    if (window.location.pathname === '/dashboard.html') {
-        if (!currentUser) {
-            window.location.href = '/login.html';
-            return;
-        }
-        displayUsername();
-    }
-}
+    <main>
+        <h1>Hedwig</h1>
+        <p>一个简单、安全的空间</p>
+
+        <div id="authButtons"></div>
+
+        <section class="message-board">
+            <h2>留言板</h2>
+            <p class="board-desc">留下你的想法，与大家交流</p>
+
+            <form id="messageForm" class="message-form">
+                <div class="form-group">
+                    <input type="text" id="msgName" placeholder="你的名字（可选）" maxlength="30">
+                </div>
+                <div class="form-group">
+                    <textarea id="msgContent" placeholder="写下你的留言..." rows="3" maxlength="500" required></textarea>
+                </div>
+                <button type="submit" class="btn-primary">发送留言</button>
+            </form>
+
+            <div id="messageList" class="message-list"></div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Hedwig</p>
+    </footer>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>
