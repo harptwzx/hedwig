@@ -66,24 +66,15 @@ main {
     text-align: center;
 }
 
-.hero {
-    margin-bottom: 50px;
-}
-
-.hero-icon {
-    font-size: 80px;
-    margin-bottom: 10px;
-}
-
-.hero h1 {
-    font-size: 42px;
+h1 {
+    font-size: 36px;
     margin-bottom: 10px;
     color: #fff;
 }
 
-.hero p {
-    color: #888;
-    font-size: 18px;
+p {
+    color: #aaa;
+    margin-bottom: 30px;
 }
 
 #authButtons {
@@ -155,31 +146,6 @@ main {
 
 .btn-github svg {
     flex-shrink: 0;
-}
-
-.btn-github {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 12px 30px;
-    border-radius: 6px;
-    text-decoration: none;
-    font-size: 16px;
-    cursor: pointer;
-    border: 1px solid #30363d;
-    background: #21262d;
-    color: #c9d1d9;
-    font-weight: 500;
-    transition: background 0.2s, border-color 0.2s;
-}
-
-.btn-github:hover {
-    background: #30363d;
-    border-color: #8b949e;
-    color: #f0f6fc;
-}
-
-.btn-github svg {
     fill: currentColor;
 }
 
@@ -333,8 +299,8 @@ footer {
         padding: 15px 20px;
     }
 
-    .hero h1 {
-        font-size: 32px;
+    h1 {
+        font-size: 28px;
     }
 
     .message-header {
