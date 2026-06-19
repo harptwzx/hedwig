@@ -7,6 +7,46 @@ const CONFIG = {
     domain: 'https://hedwig.eu.org'
 };
 
+// 纯 JS Base64，不依赖 btoa/atob
+function base64Encode(str) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const bytes = new TextEncoder().encode(str);
+    let result = '';
+    let i = 0;
+    while (i < bytes.length) {
+        const b1 = bytes[i++];
+        const b2 = i < bytes.length ? bytes[i++] : NaN;
+        const b3 = i < bytes.length ? bytes[i++] : NaN;
+        const bitmap = (b1 << 16) | ((b2 & 0xFF) << 8) | (b3 & 0xFF);
+        result += chars.charAt((bitmap >> 18) & 63);
+        result += chars.charAt((bitmap >> 12) & 63);
+        result += isNaN(b2) ? '=' : chars.charAt((bitmap >> 6) & 63);
+        result += isNaN(b3) ? '=' : chars.charAt(bitmap & 63);
+    }
+    return result;
+}
+
+function base64Decode(str) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    const lookup = new Uint8Array(256);
+    for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+    
+    const len = str.length;
+    let result = '';
+    let i = 0;
+    while (i < len) {
+        const b1 = lookup[str.charCodeAt(i++)];
+        const b2 = lookup[str.charCodeAt(i++)];
+        const b3 = lookup[str.charCodeAt(i++)];
+        const b4 = lookup[str.charCodeAt(i++)];
+        const bitmap = (b1 << 18) | (b2 << 12) | (b3 << 6) | b4;
+        result += String.fromCharCode((bitmap >> 16) & 0xFF);
+        if (b3 !== 64) result += String.fromCharCode((bitmap >> 8) & 0xFF);
+        if (b4 !== 64) result += String.fromCharCode(bitmap & 0xFF);
+    }
+    return new TextDecoder().decode(new TextEncoder().encode(result));
+}
+
 function generateSalt() {
     const arr = new Uint8Array(16);
     crypto.getRandomValues(arr);
@@ -59,7 +99,7 @@ async function readGitHubFile(filePath, token) {
         if (response.status === 404) return null;
         if (!response.ok) return null;
         const data = await response.json();
-        const content = atob(data.content);
+        const content = base64Decode(data.content);
         return { content: JSON.parse(content), sha: data.sha };
     } catch (error) {
         return null;
@@ -83,7 +123,7 @@ async function writeGitHubFile(filePath, content, commitMessage, token, existing
             }
         }
         const contentString = JSON.stringify(content, null, 2);
-        const encodedContent = btoa(unescape(encodeURIComponent(contentString)));
+        const encodedContent = base64Encode(contentString);
         const response = await fetch(url, {
             method: 'PUT',
             headers: {
@@ -168,7 +208,7 @@ async function cleanupUserSessions(env, username) {
         for (const file of files) {
             if (file.type !== 'file' || !file.name.endsWith('.json')) continue;
             try {
-                const content = atob(file.content || '');
+                const content = base64Decode(file.content || '');
                 const session = JSON.parse(content);
                 if (session.username === username) {
                     await deleteGitHubFile(`${CONFIG.sessionsPath}${file.name}`, env.GITHUB_TOKEN);
@@ -193,7 +233,7 @@ async function getMessages(env) {
         for (const file of files) {
             if (file.type !== 'file' || !file.name.endsWith('.json')) continue;
             try {
-                const content = atob(file.content || '');
+                const content = base64Decode(file.content || '');
                 const msg = JSON.parse(content);
                 messages.push(msg);
             } catch (e) {}
@@ -244,434 +284,451 @@ async function serveStaticFile(path) {
 
 export default {
     async fetch(request, env, ctx) {
-        const url = new URL(request.url);
-        const path = url.pathname;
+        try {
+            const url = new URL(request.url);
+            const path = url.pathname;
 
-        if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.GITHUB_TOKEN) {
-            return new Response('服务器配置错误', { status: 500 });
-        }
-
-        if (request.method === 'OPTIONS') {
-            return new Response(null, { headers: corsHeaders() });
-        }
-
-        const staticPaths = {
-            '/': '/index.html',
-            '/index.html': '/index.html',
-            '/login.html': '/login.html',
-            '/register.html': '/register.html',
-            '/dashboard.html': '/dashboard.html',
-            '/css/style.css': '/css/style.css',
-            '/js/app.js': '/js/app.js'
-        };
-
-        if (staticPaths[path]) {
-            const res = await serveStaticFile(staticPaths[path]);
-            if (res) return res;
-        }
-
-        if (path === '/auth/register') {
-            const username = url.searchParams.get('username');
-            const password = url.searchParams.get('password');
-            if (!username || !password) {
-                return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
-            }
-            const stateData = { username, password, type: 'register' };
-            const state = btoa(JSON.stringify(stateData));
-            const redirectUri = `${CONFIG.domain}/auth/callback`;
-            const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-            return Response.redirect(authUrl, 302);
-        }
-
-        if (path === '/auth/login') {
-            const stateData = { type: 'login' };
-            const state = btoa(JSON.stringify(stateData));
-            const redirectUri = `${CONFIG.domain}/auth/callback`;
-            const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-            return Response.redirect(authUrl, 302);
-        }
-
-        if (path === '/auth/callback') {
-            const code = url.searchParams.get('code');
-            const stateParam = url.searchParams.get('state');
-            if (!code) {
-                return Response.redirect(`${CONFIG.domain}/login.html?error=1`, 302);
-            }
-            let state;
+            // 安全读取 Secrets
+            let GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_TOKEN;
             try {
-                state = JSON.parse(atob(stateParam));
-            } catch (error) {
-                state = { type: 'login' };
+                GITHUB_CLIENT_ID = env.GITHUB_CLIENT_ID;
+                GITHUB_CLIENT_SECRET = env.GITHUB_CLIENT_SECRET;
+                GITHUB_TOKEN = env.GITHUB_TOKEN;
+            } catch (e) {
+                return new Response('读取环境变量失败', { status: 500 });
             }
 
-            const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'User-Agent': 'Hedwig-Worker'
-                },
-                body: JSON.stringify({
-                    client_id: env.GITHUB_CLIENT_ID,
-                    client_secret: env.GITHUB_CLIENT_SECRET,
-                    code: code,
-                    redirect_uri: `${CONFIG.domain}/auth/callback`
-                })
-            });
-            const tokenData = await tokenResponse.json();
-            const accessToken = tokenData.access_token;
-            if (!accessToken) {
-                return Response.redirect(`${CONFIG.domain}/login.html?error=1`, 302);
+            if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET || !GITHUB_TOKEN) {
+                return new Response('服务器配置错误', { status: 500 });
             }
 
-            const userResponse = await fetch('https://api.github.com/user', {
-                headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
-            });
-            const githubUser = await userResponse.json();
-            const githubId = githubUser.id.toString();
+            if (request.method === 'OPTIONS') {
+                return new Response(null, { headers: corsHeaders() });
+            }
 
-            const emailResponse = await fetch('https://api.github.com/user/emails', {
-                headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
-            });
-            const emails = await emailResponse.json();
-            const primaryEmail = emails.find(e => e.primary)?.email || emails[0]?.email || '';
+            const staticPaths = {
+                '/': '/index.html',
+                '/index.html': '/index.html',
+                '/login.html': '/login.html',
+                '/register.html': '/register.html',
+                '/dashboard.html': '/dashboard.html',
+                '/css/style.css': '/css/style.css',
+                '/js/app.js': '/js/app.js'
+            };
 
-            if (state.type === 'register') {
-                const { username, password } = state;
+            if (staticPaths[path]) {
+                const res = await serveStaticFile(staticPaths[path]);
+                if (res) return res;
+            }
+
+            if (path === '/auth/register') {
+                const username = url.searchParams.get('username');
+                const password = url.searchParams.get('password');
                 if (!username || !password) {
                     return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
                 }
-
-                const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
-                const existingMapping = await readGitHubFile(githubMappingPath, env.GITHUB_TOKEN);
-                if (existingMapping) {
-                    return Response.redirect(`${CONFIG.domain}/register.html?error=2`, 302);
-                }
-
-                const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
-                const existingUser = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
-                if (existingUser) {
-                    return Response.redirect(`${CONFIG.domain}/register.html?error=3`, 302);
-                }
-
-                const salt = generateSalt();
-                const passwordHash = await hashPassword(password, salt);
-
-                const userData = {
-                    id: Date.now().toString(),
-                    username: username,
-                    passwordHash: passwordHash,
-                    salt: salt,
-                    tokenVersion: 1,
-                    githubId: githubId,
-                    githubLogin: githubUser.login,
-                    email: primaryEmail,
-                    avatar: githubUser.avatar_url,
-                    createdAt: new Date().toISOString()
-                };
-
-                const userWriteSuccess = await writeGitHubFile(userFilePath, userData, `创建用户: ${username}`, env.GITHUB_TOKEN);
-                const mappingWriteSuccess = await writeGitHubFile(githubMappingPath, { username: username, githubId: githubId }, `绑定 GitHub: ${username}`, env.GITHUB_TOKEN);
-
-                if (!userWriteSuccess || !mappingWriteSuccess) {
-                    return Response.redirect(`${CONFIG.domain}/register.html?error=4`, 302);
-                }
-                return Response.redirect(`${CONFIG.domain}/login.html?registered=1`, 302);
+                const stateData = { username, password, type: 'register' };
+                const state = base64Encode(JSON.stringify(stateData));
+                const redirectUri = `${CONFIG.domain}/auth/callback`;
+                const authUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
+                return Response.redirect(authUrl, 302);
             }
 
-            if (state.type === 'login') {
-                const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
-                const mappingResult = await readGitHubFile(githubMappingPath, env.GITHUB_TOKEN);
-                if (!mappingResult) {
-                    return Response.redirect(`${CONFIG.domain}/login.html?error=2`, 302);
-                }
-
-                const userFilePath = `${CONFIG.dataPath}user_${mappingResult.content.username}.json`;
-                const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
-                if (!userResult) {
-                    return Response.redirect(`${CONFIG.domain}/login.html?error=3`, 302);
-                }
-
-                const userData = userResult.content;
-                const sessionId = generateSessionId();
-                const sessionData = {
-                    userId: userData.id,
-                    username: userData.username,
-                    avatar: userData.avatar,
-                    tokenVersion: userData.tokenVersion || 1,
-                    expires: Date.now() + 7 * 24 * 60 * 60 * 1000
-                };
-
-                await saveSession(env, sessionId, sessionData);
-
-                const response = Response.redirect(`${CONFIG.domain}/dashboard.html`, 302);
-                response.headers.set('Set-Cookie', setSessionCookie(sessionId));
-                return response;
+            if (path === '/auth/login') {
+                const stateData = { type: 'login' };
+                const state = base64Encode(JSON.stringify(stateData));
+                const redirectUri = `${CONFIG.domain}/auth/callback`;
+                const authUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
+                return Response.redirect(authUrl, 302);
             }
 
-            return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);
-        }
+            if (path === '/auth/callback') {
+                const code = url.searchParams.get('code');
+                const stateParam = url.searchParams.get('state');
+                if (!code) {
+                    return Response.redirect(`${CONFIG.domain}/login.html?error=1`, 302);
+                }
+                let state;
+                try {
+                    state = JSON.parse(base64Decode(stateParam));
+                } catch (error) {
+                    state = { type: 'login' };
+                }
 
-        if (path === '/api/login' && request.method === 'POST') {
-            try {
-                const { username, password } = await request.json();
+                const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Accept': 'application/json',
+                        'User-Agent': 'Hedwig-Worker'
+                    },
+                    body: new URLSearchParams({
+                        client_id: GITHUB_CLIENT_ID,
+                        client_secret: GITHUB_CLIENT_SECRET,
+                        code: code,
+                        redirect_uri: `${CONFIG.domain}/auth/callback`
+                    }).toString()
+                });
+                const tokenData = await tokenResponse.json();
+                if (!tokenData || !tokenData.access_token) {
+                    return new Response(`GitHub OAuth 错误: ${JSON.stringify(tokenData)}`, { status: 500 });
+                }
+                const accessToken = tokenData.access_token;
 
-                if (!username || !password) {
+                const userResponse = await fetch('https://api.github.com/user', {
+                    headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
+                });
+                const githubUser = await userResponse.json();
+                const githubId = githubUser.id.toString();
+
+                const emailResponse = await fetch('https://api.github.com/user/emails', {
+                    headers: { 'Authorization': `Bearer ${accessToken}`, 'User-Agent': 'Hedwig-Worker' }
+                });
+                const emails = await emailResponse.json();
+                const primaryEmail = emails.find(e => e.primary)?.email || emails[0]?.email || '';
+
+                if (state.type === 'register') {
+                    const { username, password } = state;
+                    if (!username || !password) {
+                        return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
+                    }
+
+                    const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
+                    const existingMapping = await readGitHubFile(githubMappingPath, GITHUB_TOKEN);
+                    if (existingMapping) {
+                        return Response.redirect(`${CONFIG.domain}/register.html?error=2`, 302);
+                    }
+
+                    const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
+                    const existingUser = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                    if (existingUser) {
+                        return Response.redirect(`${CONFIG.domain}/register.html?error=3`, 302);
+                    }
+
+                    const salt = generateSalt();
+                    const passwordHash = await hashPassword(password, salt);
+
+                    const userData = {
+                        id: Date.now().toString(),
+                        username: username,
+                        passwordHash: passwordHash,
+                        salt: salt,
+                        tokenVersion: 1,
+                        githubId: githubId,
+                        githubLogin: githubUser.login,
+                        email: primaryEmail,
+                        avatar: githubUser.avatar_url,
+                        createdAt: new Date().toISOString()
+                    };
+
+                    const userWriteSuccess = await writeGitHubFile(userFilePath, userData, `创建用户: ${username}`, GITHUB_TOKEN);
+                    const mappingWriteSuccess = await writeGitHubFile(githubMappingPath, { username: username, githubId: githubId }, `绑定 GitHub: ${username}`, GITHUB_TOKEN);
+
+                    if (!userWriteSuccess || !mappingWriteSuccess) {
+                        return Response.redirect(`${CONFIG.domain}/register.html?error=4`, 302);
+                    }
+                    return Response.redirect(`${CONFIG.domain}/login.html?registered=1`, 302);
+                }
+
+                if (state.type === 'login') {
+                    const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
+                    const mappingResult = await readGitHubFile(githubMappingPath, GITHUB_TOKEN);
+                    if (!mappingResult) {
+                        return Response.redirect(`${CONFIG.domain}/login.html?error=2`, 302);
+                    }
+
+                    const userFilePath = `${CONFIG.dataPath}user_${mappingResult.content.username}.json`;
+                    const userResult = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                    if (!userResult) {
+                        return Response.redirect(`${CONFIG.domain}/login.html?error=3`, 302);
+                    }
+
+                    const userData = userResult.content;
+                    const sessionId = generateSessionId();
+                    const sessionData = {
+                        userId: userData.id,
+                        username: userData.username,
+                        avatar: userData.avatar,
+                        tokenVersion: userData.tokenVersion || 1,
+                        expires: Date.now() + 7 * 24 * 60 * 60 * 1000
+                    };
+
+                    await saveSession(env, sessionId, sessionData);
+
+                    const response = Response.redirect(`${CONFIG.domain}/dashboard.html`, 302);
+                    response.headers.set('Set-Cookie', setSessionCookie(sessionId));
+                    return response;
+                }
+
+                return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);
+            }
+
+            if (path === '/api/login' && request.method === 'POST') {
+                try {
+                    const { username, password } = await request.json();
+
+                    if (!username || !password) {
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: '用户名和密码不能为空'
+                        }), {
+                            status: 400,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
+                    const userResult = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+
+                    if (!userResult) {
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: '用户名或密码错误'
+                        }), {
+                            status: 401,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const userData = userResult.content;
+
+                    let passwordValid = false;
+                    if (userData.passwordHash && userData.salt) {
+                        passwordValid = await verifyPassword(password, userData.passwordHash, userData.salt);
+                    } else if (userData.password) {
+                        passwordValid = userData.password === btoa(password);
+                    }
+
+                    if (!passwordValid) {
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: '用户名或密码错误'
+                        }), {
+                            status: 401,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const sessionId = generateSessionId();
+                    const sessionData = {
+                        userId: userData.id,
+                        username: userData.username,
+                        avatar: userData.avatar,
+                        tokenVersion: userData.tokenVersion || 1,
+                        expires: Date.now() + 7 * 24 * 60 * 60 * 1000
+                    };
+
+                    await saveSession(env, sessionId, sessionData);
+
+                    const responseData = {
+                        success: true,
+                        redirect: '/dashboard.html'
+                    };
+
+                    const response = new Response(JSON.stringify(responseData), {
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                    response.headers.set('Set-Cookie', setSessionCookie(sessionId));
+                    return response;
+
+                } catch (error) {
                     return new Response(JSON.stringify({
                         success: false,
-                        error: '用户名和密码不能为空'
+                        error: '服务器错误'
                     }), {
-                        status: 400,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
-                }
-
-                const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
-                const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
-
-                if (!userResult) {
-                    return new Response(JSON.stringify({
-                        success: false,
-                        error: '用户名或密码错误'
-                    }), {
-                        status: 401,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
-                }
-
-                const userData = userResult.content;
-
-                let passwordValid = false;
-                if (userData.passwordHash && userData.salt) {
-                    passwordValid = await verifyPassword(password, userData.passwordHash, userData.salt);
-                } else if (userData.password) {
-                    passwordValid = userData.password === btoa(password);
-                }
-
-                if (!passwordValid) {
-                    return new Response(JSON.stringify({
-                        success: false,
-                        error: '用户名或密码错误'
-                    }), {
-                        status: 401,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
-                }
-
-                const sessionId = generateSessionId();
-                const sessionData = {
-                    userId: userData.id,
-                    username: userData.username,
-                    avatar: userData.avatar,
-                    tokenVersion: userData.tokenVersion || 1,
-                    expires: Date.now() + 7 * 24 * 60 * 60 * 1000
-                };
-
-                await saveSession(env, sessionId, sessionData);
-
-                const responseData = {
-                    success: true,
-                    redirect: '/dashboard.html'
-                };
-
-                const response = new Response(JSON.stringify(responseData), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-                response.headers.set('Set-Cookie', setSessionCookie(sessionId));
-                return response;
-
-            } catch (error) {
-                return new Response(JSON.stringify({
-                    success: false,
-                    error: '服务器错误'
-                }), {
-                    status: 500,
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-            }
-        }
-
-        if (path === '/api/current-user' && request.method === 'GET') {
-            const sessionId = getSessionId(request);
-
-            if (!sessionId) {
-                return new Response(JSON.stringify({ user: null }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-            }
-
-            const sessionResult = await getSession(env, sessionId);
-            if (!sessionResult) {
-                const response = new Response(JSON.stringify({ user: null }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-                response.headers.set('Set-Cookie', clearSessionCookie());
-                return response;
-            }
-
-            const session = sessionResult.session;
-            const userFilePath = `${CONFIG.dataPath}user_${session.username}.json`;
-            const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
-
-            if (!userResult) {
-                await deleteSession(env, sessionId);
-                return new Response(JSON.stringify({ user: null }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-            }
-
-            const userData = userResult.content;
-
-            if (session.tokenVersion !== (userData.tokenVersion || 1)) {
-                await deleteSession(env, sessionId);
-                const response = new Response(JSON.stringify({ user: null }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-                response.headers.set('Set-Cookie', clearSessionCookie());
-                return response;
-            }
-
-            return new Response(JSON.stringify({
-                user: {
-                    id: session.userId,
-                    username: session.username,
-                    avatar: session.avatar
-                }
-            }), { headers: { ...corsHeaders(), 'Content-Type': 'application/json' } });
-        }
-
-        if (path === '/api/logout' && request.method === 'POST') {
-            const sessionId = getSessionId(request);
-            if (sessionId) {
-                await deleteSession(env, sessionId);
-            }
-            const response = new Response(JSON.stringify({ success: true }), {
-                headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-            });
-            response.headers.set('Set-Cookie', clearSessionCookie());
-            return response;
-        }
-
-        if (path === '/api/change-password' && request.method === 'POST') {
-            const sessionId = getSessionId(request);
-            if (!sessionId) {
-                return new Response(JSON.stringify({ success: false, error: '未登录' }), {
-                    status: 401,
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-            }
-
-            const sessionResult = await getSession(env, sessionId);
-            if (!sessionResult) {
-                return new Response(JSON.stringify({ success: false, error: 'Session 无效' }), {
-                    status: 401,
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-            }
-
-            try {
-                const { oldPassword, newPassword } = await request.json();
-                if (!oldPassword || !newPassword || newPassword.length < 6) {
-                    return new Response(JSON.stringify({ success: false, error: '密码格式错误' }), {
-                        status: 400,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
-                }
-
-                const userFilePath = `${CONFIG.dataPath}user_${sessionResult.session.username}.json`;
-                const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
-                if (!userResult) {
-                    return new Response(JSON.stringify({ success: false, error: '用户不存在' }), {
-                        status: 404,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
-                }
-
-                const userData = userResult.content;
-
-                let oldValid = false;
-                if (userData.passwordHash && userData.salt) {
-                    oldValid = await verifyPassword(oldPassword, userData.passwordHash, userData.salt);
-                } else if (userData.password) {
-                    oldValid = userData.password === btoa(oldPassword);
-                }
-
-                if (!oldValid) {
-                    return new Response(JSON.stringify({ success: false, error: '旧密码错误' }), {
-                        status: 401,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
-                }
-
-                const newSalt = generateSalt();
-                userData.passwordHash = await hashPassword(newPassword, newSalt);
-                userData.salt = newSalt;
-                userData.tokenVersion = (userData.tokenVersion || 1) + 1;
-
-                await writeGitHubFile(userFilePath, userData, '修改密码', env.GITHUB_TOKEN, userResult.sha);
-                await cleanupUserSessions(env, userData.username);
-
-                return new Response(JSON.stringify({ success: true }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-
-            } catch (error) {
-                return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
-                    status: 500,
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
-            }
-        }
-
-        if (path === '/api/messages' && request.method === 'GET') {
-            const messages = await getMessages(env);
-            return new Response(JSON.stringify({ messages }), {
-                headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-            });
-        }
-
-        if (path === '/api/messages' && request.method === 'POST') {
-            try {
-                const { name, content } = await request.json();
-                if (!content || content.trim().length === 0) {
-                    return new Response(JSON.stringify({ success: false, error: '留言内容不能为空' }), {
-                        status: 400,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
-                }
-                if (content.length > 500) {
-                    return new Response(JSON.stringify({ success: false, error: '留言内容不能超过500字' }), {
-                        status: 400,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
-                }
-
-                const messageData = {
-                    id: generateMessageId(),
-                    name: name ? name.trim().substring(0, 30) : '匿名',
-                    content: content.trim(),
-                    timestamp: Date.now()
-                };
-
-                const success = await saveMessage(env, messageData);
-                if (!success) {
-                    return new Response(JSON.stringify({ success: false, error: '保存失败' }), {
                         status: 500,
                         headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
                     });
                 }
+            }
 
-                return new Response(JSON.stringify({ success: true, message: messageData }), {
+            if (path === '/api/current-user' && request.method === 'GET') {
+                const sessionId = getSessionId(request);
+
+                if (!sessionId) {
+                    return new Response(JSON.stringify({ user: null }), {
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+
+                const sessionResult = await getSession(env, sessionId);
+                if (!sessionResult) {
+                    const response = new Response(JSON.stringify({ user: null }), {
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                    response.headers.set('Set-Cookie', clearSessionCookie());
+                    return response;
+                }
+
+                const session = sessionResult.session;
+                const userFilePath = `${CONFIG.dataPath}user_${session.username}.json`;
+                const userResult = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+
+                if (!userResult) {
+                    await deleteSession(env, sessionId);
+                    return new Response(JSON.stringify({ user: null }), {
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+
+                const userData = userResult.content;
+
+                if (session.tokenVersion !== (userData.tokenVersion || 1)) {
+                    await deleteSession(env, sessionId);
+                    const response = new Response(JSON.stringify({ user: null }), {
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                    response.headers.set('Set-Cookie', clearSessionCookie());
+                    return response;
+                }
+
+                return new Response(JSON.stringify({
+                    user: {
+                        id: session.userId,
+                        username: session.username,
+                        avatar: session.avatar
+                    }
+                }), { headers: { ...corsHeaders(), 'Content-Type': 'application/json' } });
+            }
+
+            if (path === '/api/logout' && request.method === 'POST') {
+                const sessionId = getSessionId(request);
+                if (sessionId) {
+                    await deleteSession(env, sessionId);
+                }
+                const response = new Response(JSON.stringify({ success: true }), {
                     headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
                 });
-            } catch (error) {
-                return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
-                    status: 500,
+                response.headers.set('Set-Cookie', clearSessionCookie());
+                return response;
+            }
+
+            if (path === '/api/change-password' && request.method === 'POST') {
+                const sessionId = getSessionId(request);
+                if (!sessionId) {
+                    return new Response(JSON.stringify({ success: false, error: '未登录' }), {
+                        status: 401,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+
+                const sessionResult = await getSession(env, sessionId);
+                if (!sessionResult) {
+                    return new Response(JSON.stringify({ success: false, error: 'Session 无效' }), {
+                        status: 401,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+
+                try {
+                    const { oldPassword, newPassword } = await request.json();
+                    if (!oldPassword || !newPassword || newPassword.length < 6) {
+                        return new Response(JSON.stringify({ success: false, error: '密码格式错误' }), {
+                            status: 400,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const userFilePath = `${CONFIG.dataPath}user_${sessionResult.session.username}.json`;
+                    const userResult = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                    if (!userResult) {
+                        return new Response(JSON.stringify({ success: false, error: '用户不存在' }), {
+                            status: 404,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const userData = userResult.content;
+
+                    let oldValid = false;
+                    if (userData.passwordHash && userData.salt) {
+                        oldValid = await verifyPassword(oldPassword, userData.passwordHash, userData.salt);
+                    } else if (userData.password) {
+                        oldValid = userData.password === btoa(oldPassword);
+                    }
+
+                    if (!oldValid) {
+                        return new Response(JSON.stringify({ success: false, error: '旧密码错误' }), {
+                            status: 401,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const newSalt = generateSalt();
+                    userData.passwordHash = await hashPassword(newPassword, newSalt);
+                    userData.salt = newSalt;
+                    userData.tokenVersion = (userData.tokenVersion || 1) + 1;
+
+                    await writeGitHubFile(userFilePath, userData, '修改密码', GITHUB_TOKEN, userResult.sha);
+                    await cleanupUserSessions(env, userData.username);
+
+                    return new Response(JSON.stringify({ success: true }), {
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+
+                } catch (error) {
+                    return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
+                        status: 500,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+            }
+
+            if (path === '/api/messages' && request.method === 'GET') {
+                const messages = await getMessages(env);
+                return new Response(JSON.stringify({ messages }), {
                     headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
                 });
             }
-        }
 
-        return new Response('Not Found', { status: 404 });
+            if (path === '/api/messages' && request.method === 'POST') {
+                try {
+                    const { name, content } = await request.json();
+                    if (!content || content.trim().length === 0) {
+                        return new Response(JSON.stringify({ success: false, error: '留言内容不能为空' }), {
+                            status: 400,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+                    if (content.length > 500) {
+                        return new Response(JSON.stringify({ success: false, error: '留言内容不能超过500字' }), {
+                            status: 400,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const messageData = {
+                        id: generateMessageId(),
+                        name: name ? name.trim().substring(0, 30) : '匿名',
+                        content: content.trim(),
+                        timestamp: Date.now()
+                    };
+
+                    const success = await saveMessage(env, messageData);
+                    if (!success) {
+                        return new Response(JSON.stringify({ success: false, error: '保存失败' }), {
+                            status: 500,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    return new Response(JSON.stringify({ success: true, message: messageData }), {
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                } catch (error) {
+                    return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
+                        status: 500,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+            }
+
+            return new Response('Not Found', { status: 404 });
+        } catch (error) {
+            return new Response(`Worker Error: ${error.message}\\nStack: ${error.stack}`, {
+                status: 500,
+                headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+            });
+        }
     }
 };
