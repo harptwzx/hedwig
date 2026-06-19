@@ -8,17 +8,24 @@
 </head>
 <body>
     <nav>
-        <div class="logo">Hedwig</div>
-        <div id="navLinks"></div>
+        <div class="logo"><a href="/">Hedwig</a></div>
+        <div id="navLinks">
+            <a href="/login.html">登录</a>
+            <a href="/register.html">注册</a>
+        </div>
     </nav>
 
     <main>
-        <h1>Hedwig</h1>
-        <p>一个简单、安全的空间</p>
+        <div class="hero-section">
+            <h1>Hedwig</h1>
+            <p class="subtitle">一个简单、安全的空间</p>
+            <div id="authButtons">
+                <a href="/login.html" class="btn-primary">登录</a>
+                <a href="/register.html" class="btn-primary">注册</a>
+            </div>
+        </div>
 
-        <div id="authButtons"></div>
-
-        <section class="message-board">
+        <div class="message-board golden-board">
             <h2>留言板</h2>
             <p class="board-desc">留下你的想法，与大家交流</p>
 
@@ -27,20 +34,18 @@
                     <input type="text" id="msgName" placeholder="你的名字（可选）" maxlength="30">
                 </div>
                 <div class="form-group">
-                    <textarea id="msgContent" placeholder="写下你的留言..." rows="3" maxlength="500" required></textarea>
+                    <textarea id="msgContent" rows="4" placeholder="写下你的留言..." maxlength="500" required></textarea>
                 </div>
                 <button type="submit" class="btn-primary">发送留言</button>
             </form>
 
-            <div id="messageList" class="message-list"></div>
-        </section>
+            <div id="messageList" class="message-list">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
     </main>
-
-    <footer>
-        <p>Hedwig</p>
-        <p>加微信？搜索H7Grfdharpt0406</p>
-    </footer>
 
     <script src="/js/app.js"></script>
 </body>
 </html>
+

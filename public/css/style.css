@@ -27,8 +27,13 @@ nav {
 }
 
 .logo a {
-    color: #7c8cff;
+    color: #4a4a6a;
     text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+.logo a:hover {
+    color: #7c8cff;
 }
 
 #navLinks {
@@ -294,6 +299,36 @@ footer {
     margin-top: 40px;
 }
 
+/* ===== 首页黄金比例布局（仅 index.html） ===== */
+.hero-section {
+    min-height: 38.2vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 20px 0;
+}
+
+.hero-section h1 {
+    font-size: 42px;
+    margin-bottom: 12px;
+}
+
+.hero-section .subtitle {
+    color: #888;
+    margin-bottom: 28px;
+    font-size: 16px;
+}
+
+.hero-section #authButtons {
+    margin: 0;
+}
+
+.golden-board {
+    min-height: 61.8vh;
+    padding: 50px 0 40px;
+}
+
 @media (max-width: 600px) {
     nav {
         padding: 15px 20px;
@@ -301,6 +336,10 @@ footer {
 
     h1 {
         font-size: 28px;
+    }
+
+    .hero-section h1 {
+        font-size: 32px;
     }
 
     .message-header {
