@@ -31,7 +31,7 @@ function showCookieConsent() {
                 <h2 style="margin: 0 0 15px 0; color: #7c8cff;">Cookie 使用提示</h2>
                 <p style="margin: 0 0 25px 0; line-height: 1.6; font-size: 14px; color: #aaa;">
                     本网站使用 Cookie 来保存您的登录状态。<br>
-                    没有 Cookie，您将无法登录 和使用个性化功能。
+                    没有 Cookie，您将无法登录和使用个性化功能。
                 </p>
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     <button id="accept-cookie" style="
@@ -69,7 +69,7 @@ function showCookieConsent() {
                 <div style="text-align: center; color: #666;">
                     <div style="font-size: 64px; margin-bottom: 20px;"></div>
                     <h1 style="color: #7c8cff; margin-bottom: 15px;">访问已关闭</h1>
-                    <p>您拒绝了 Cookie 使用， 无法继续访问。</p>
+                    <p>您拒绝了 Cookie 使用，无法继续访问。</p>
                     <p style="font-size: 13px; margin-top: 20px;">请开启浏览器 Cookie 后刷新页面</p>
                 </div>
             </div>
@@ -141,7 +141,7 @@ function renderNav() {
     if (currentUser) {
         navLinks.innerHTML = `
             <span class="user-info">欢迎, ${currentUser.username}</span>
-            <button onclick="logout()">退出登 录</button>
+            <button onclick="logout()">退出登录</button>
         `;
     } else {
         navLinks.innerHTML = `
@@ -171,7 +171,7 @@ function handleUrlParams() {
     const messageEl = document.getElementById('message');
     if (!messageEl) return;
     if (registered === '1') {
-        messageEl.textContent = '注册成功！请 登录';
+        messageEl.textContent = '注册成功！请登录';
         messageEl.className = 'message success';
         messageEl.style.display = 'block';
         setTimeout(() => { messageEl.style.display = 'none'; }, 3000);
@@ -370,8 +370,7 @@ async function loadMessages() {
         allMessages = data.messages || [];
 
         if (allMessages.length === 0) {
-            msgList.innerHTML = '<div class="no-messages">还没有留言，来写第一条吧 </div>';
-            document.getElementById('pagination').style.display = 'none';
+            renderEmptyBoard();
             return;
         }
 
@@ -385,6 +384,21 @@ async function loadMessages() {
     }
 }
 
+function renderEmptyBoard() {
+    const msgList = document.getElementById('messageList');
+    const pagination = document.getElementById('pagination');
+    if (!msgList) return;
+
+    msgList.innerHTML = `
+        <div class="empty-board">
+            <div class="empty-icon">💬</div>
+            <p>这里还没有留言</p>
+            <p class="empty-hint">写下第一条留言，开启交流吧</p>
+        </div>
+    `;
+    if (pagination) pagination.style.display = 'none';
+}
+
 function renderCompactMessages() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
@@ -395,11 +409,11 @@ function renderCompactMessages() {
     msgList.classList.add('compact');
     msgList.innerHTML = displayMessages.map(msg => createMessageHTML(msg)).join('');
 
-    // 如果还有更多，显示展开提示
+    // 如果还有更多，显示展开提示（放在第三条留言下方）
     if (allMessages.length > COMPACT_COUNT) {
         const expandDiv = document.createElement('div');
         expandDiv.className = 'expand-hint';
-        expandDiv.innerHTML = `还有 ${allMessages.length - COMPACT_COUNT} 条留言 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+        expandDiv.innerHTML = `展开全部 ${allMessages.length} 条留言 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
         expandDiv.addEventListener('click', () => {
             document.getElementById('toggleBoardBtn').click();
         });
