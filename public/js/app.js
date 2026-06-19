@@ -221,7 +221,7 @@ async function handleLogin(e) {
     }
 }
 
-function handleRegister(e) {
+async function handleRegister(e) {
     e.preventDefault();
     const username = document.getElementById('username').value.trim();
     const password = document.getElementById('password').value;
@@ -239,7 +239,21 @@ function handleRegister(e) {
         showMessage(messageEl, '两次输入的密码不一致', 'error');
         return;
     }
-    window.location.href = `/auth/register?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`;
+    try {
+        const response = await fetch('/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        if (response.redirected) {
+            window.location.href = response.url;
+        } else {
+            const data = await response.json();
+            showMessage(messageEl, data.error || '注册失败', 'error');
+        }
+    } catch (error) {
+        showMessage(messageEl, '网络错误，请重试', 'error');
+    }
 }
 
 function showMessage(el, text, type) {

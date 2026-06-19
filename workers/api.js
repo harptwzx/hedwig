@@ -7,44 +7,19 @@ const CONFIG = {
     domain: 'https://hedwig.eu.org'
 };
 
-// 纯 JS Base64，不依赖 btoa/atob
 function base64Encode(str) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     const bytes = new TextEncoder().encode(str);
-    let result = '';
-    let i = 0;
-    while (i < bytes.length) {
-        const b1 = bytes[i++];
-        const b2 = i < bytes.length ? bytes[i++] : NaN;
-        const b3 = i < bytes.length ? bytes[i++] : NaN;
-        const bitmap = (b1 << 16) | ((b2 & 0xFF) << 8) | (b3 & 0xFF);
-        result += chars.charAt((bitmap >> 18) & 63);
-        result += chars.charAt((bitmap >> 12) & 63);
-        result += isNaN(b2) ? '=' : chars.charAt((bitmap >> 6) & 63);
-        result += isNaN(b3) ? '=' : chars.charAt(bitmap & 63);
-    }
-    return result;
+    const binString = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
+    return btoa(binString);
 }
 
 function base64Decode(str) {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    const lookup = new Uint8Array(256);
-    for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-    
-    const len = str.length;
-    let result = '';
-    let i = 0;
-    while (i < len) {
-        const b1 = lookup[str.charCodeAt(i++)];
-        const b2 = lookup[str.charCodeAt(i++)];
-        const b3 = lookup[str.charCodeAt(i++)];
-        const b4 = lookup[str.charCodeAt(i++)];
-        const bitmap = (b1 << 18) | (b2 << 12) | (b3 << 6) | b4;
-        result += String.fromCharCode((bitmap >> 16) & 0xFF);
-        if (b3 !== 64) result += String.fromCharCode((bitmap >> 8) & 0xFF);
-        if (b4 !== 64) result += String.fromCharCode(bitmap & 0xFF);
+    const binString = atob(str);
+    const bytes = new Uint8Array(binString.length);
+    for (let i = 0; i < binString.length; i++) {
+        bytes[i] = binString.charCodeAt(i);
     }
-    return new TextDecoder().decode(new TextEncoder().encode(result));
+    return new TextDecoder().decode(bytes);
 }
 
 function generateSalt() {
@@ -78,9 +53,10 @@ function generateMessageId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 }
 
-function corsHeaders() {
+function corsHeaders(request) {
+    const origin = request.headers.get('Origin') || CONFIG.domain;
     return {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': origin,
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Credentials': 'true'
@@ -99,9 +75,10 @@ async function readGitHubFile(filePath, token) {
         if (response.status === 404) return null;
         if (!response.ok) return null;
         const data = await response.json();
-        const content = base64Decode(data.content);
+        const content = base64Decode(data.content.replace(/\n/g, ''));
         return { content: JSON.parse(content), sha: data.sha };
     } catch (error) {
+        console.error('readGitHubFile error:', filePath, error.message);
         return null;
     }
 }
@@ -139,6 +116,7 @@ async function writeGitHubFile(filePath, content, commitMessage, token, existing
         });
         return response.ok;
     } catch (error) {
+        console.error('writeGitHubFile error:', filePath, error.message);
         return false;
     }
 }
@@ -168,6 +146,7 @@ async function deleteGitHubFile(filePath, token) {
         });
         return response.ok;
     } catch (error) {
+        console.error('deleteGitHubFile error:', filePath, error.message);
         return false;
     }
 }
@@ -215,7 +194,9 @@ async function cleanupUserSessions(env, username) {
                 }
             } catch (e) {}
         }
-    } catch (error) {}
+    } catch (error) {
+        console.error('cleanupUserSessions error:', error.message);
+    }
 }
 
 async function getMessages(env) {
@@ -240,6 +221,7 @@ async function getMessages(env) {
         }
         return messages.sort((a, b) => b.timestamp - a.timestamp);
     } catch (error) {
+        console.error('getMessages error:', error.message);
         return [];
     }
 }
@@ -278,7 +260,9 @@ async function serveStaticFile(path) {
             if (path.endsWith('.svg')) contentType = 'image/svg+xml';
             return new Response(content, { headers: { 'Content-Type': contentType } });
         }
-    } catch (error) {}
+    } catch (error) {
+        console.error('serveStaticFile error:', path, error.message);
+    }
     return null;
 }
 
@@ -288,22 +272,14 @@ export default {
             const url = new URL(request.url);
             const path = url.pathname;
 
-            // 安全读取 Secrets
-            let GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GITHUB_TOKEN;
-            try {
-                GITHUB_CLIENT_ID = env.GITHUB_CLIENT_ID;
-                GITHUB_CLIENT_SECRET = env.GITHUB_CLIENT_SECRET;
-                GITHUB_TOKEN = env.GITHUB_TOKEN;
-            } catch (e) {
-                return new Response('读取环境变量失败', { status: 500 });
-            }
+            console.log(`[${new Date().toISOString()}] ${request.method} ${path}`);
 
-            if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET || !GITHUB_TOKEN) {
+            if (!env.GITHUB_CLIENT_ID || !env.GITHUB_CLIENT_SECRET || !env.GITHUB_TOKEN) {
                 return new Response('服务器配置错误', { status: 500 });
             }
 
             if (request.method === 'OPTIONS') {
-                return new Response(null, { headers: corsHeaders() });
+                return new Response(null, { headers: corsHeaders(request) });
             }
 
             const staticPaths = {
@@ -330,7 +306,7 @@ export default {
                 const stateData = { username, password, type: 'register' };
                 const state = base64Encode(JSON.stringify(stateData));
                 const redirectUri = `${CONFIG.domain}/auth/callback`;
-                const authUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
+                const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
                 return Response.redirect(authUrl, 302);
             }
 
@@ -338,7 +314,7 @@ export default {
                 const stateData = { type: 'login' };
                 const state = base64Encode(JSON.stringify(stateData));
                 const redirectUri = `${CONFIG.domain}/auth/callback`;
-                const authUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
+                const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
                 return Response.redirect(authUrl, 302);
             }
 
@@ -363,8 +339,8 @@ export default {
                         'User-Agent': 'Hedwig-Worker'
                     },
                     body: new URLSearchParams({
-                        client_id: GITHUB_CLIENT_ID,
-                        client_secret: GITHUB_CLIENT_SECRET,
+                        client_id: env.GITHUB_CLIENT_ID,
+                        client_secret: env.GITHUB_CLIENT_SECRET,
                         code: code,
                         redirect_uri: `${CONFIG.domain}/auth/callback`
                     }).toString()
@@ -394,13 +370,13 @@ export default {
                     }
 
                     const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
-                    const existingMapping = await readGitHubFile(githubMappingPath, GITHUB_TOKEN);
+                    const existingMapping = await readGitHubFile(githubMappingPath, env.GITHUB_TOKEN);
                     if (existingMapping) {
                         return Response.redirect(`${CONFIG.domain}/register.html?error=2`, 302);
                     }
 
                     const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
-                    const existingUser = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                    const existingUser = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
                     if (existingUser) {
                         return Response.redirect(`${CONFIG.domain}/register.html?error=3`, 302);
                     }
@@ -421,8 +397,8 @@ export default {
                         createdAt: new Date().toISOString()
                     };
 
-                    const userWriteSuccess = await writeGitHubFile(userFilePath, userData, `创建用户: ${username}`, GITHUB_TOKEN);
-                    const mappingWriteSuccess = await writeGitHubFile(githubMappingPath, { username: username, githubId: githubId }, `绑定 GitHub: ${username}`, GITHUB_TOKEN);
+                    const userWriteSuccess = await writeGitHubFile(userFilePath, userData, `创建用户: ${username}`, env.GITHUB_TOKEN);
+                    const mappingWriteSuccess = await writeGitHubFile(githubMappingPath, { username: username, githubId: githubId }, `绑定 GitHub: ${username}`, env.GITHUB_TOKEN);
 
                     if (!userWriteSuccess || !mappingWriteSuccess) {
                         return Response.redirect(`${CONFIG.domain}/register.html?error=4`, 302);
@@ -432,13 +408,13 @@ export default {
 
                 if (state.type === 'login') {
                     const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
-                    const mappingResult = await readGitHubFile(githubMappingPath, GITHUB_TOKEN);
+                    const mappingResult = await readGitHubFile(githubMappingPath, env.GITHUB_TOKEN);
                     if (!mappingResult) {
                         return Response.redirect(`${CONFIG.domain}/login.html?error=2`, 302);
                     }
 
                     const userFilePath = `${CONFIG.dataPath}user_${mappingResult.content.username}.json`;
-                    const userResult = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                    const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
                     if (!userResult) {
                         return Response.redirect(`${CONFIG.domain}/login.html?error=3`, 302);
                     }
@@ -473,12 +449,12 @@ export default {
                             error: '用户名和密码不能为空'
                         }), {
                             status: 400,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
 
                     const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
-                    const userResult = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                    const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
 
                     if (!userResult) {
                         return new Response(JSON.stringify({
@@ -486,7 +462,7 @@ export default {
                             error: '用户名或密码错误'
                         }), {
                             status: 401,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
 
@@ -505,7 +481,7 @@ export default {
                             error: '用户名或密码错误'
                         }), {
                             status: 401,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
 
@@ -526,18 +502,19 @@ export default {
                     };
 
                     const response = new Response(JSON.stringify(responseData), {
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                     response.headers.set('Set-Cookie', setSessionCookie(sessionId));
                     return response;
 
                 } catch (error) {
+                    console.error('/api/login error:', error.message);
                     return new Response(JSON.stringify({
                         success: false,
                         error: '服务器错误'
                     }), {
                         status: 500,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                 }
             }
@@ -547,14 +524,14 @@ export default {
 
                 if (!sessionId) {
                     return new Response(JSON.stringify({ user: null }), {
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                 }
 
                 const sessionResult = await getSession(env, sessionId);
                 if (!sessionResult) {
                     const response = new Response(JSON.stringify({ user: null }), {
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                     response.headers.set('Set-Cookie', clearSessionCookie());
                     return response;
@@ -562,12 +539,12 @@ export default {
 
                 const session = sessionResult.session;
                 const userFilePath = `${CONFIG.dataPath}user_${session.username}.json`;
-                const userResult = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
 
                 if (!userResult) {
                     await deleteSession(env, sessionId);
                     return new Response(JSON.stringify({ user: null }), {
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                 }
 
@@ -576,7 +553,7 @@ export default {
                 if (session.tokenVersion !== (userData.tokenVersion || 1)) {
                     await deleteSession(env, sessionId);
                     const response = new Response(JSON.stringify({ user: null }), {
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                     response.headers.set('Set-Cookie', clearSessionCookie());
                     return response;
@@ -588,7 +565,7 @@ export default {
                         username: session.username,
                         avatar: session.avatar
                     }
-                }), { headers: { ...corsHeaders(), 'Content-Type': 'application/json' } });
+                }), { headers: { ...corsHeaders(request), 'Content-Type': 'application/json' } });
             }
 
             if (path === '/api/logout' && request.method === 'POST') {
@@ -597,7 +574,7 @@ export default {
                     await deleteSession(env, sessionId);
                 }
                 const response = new Response(JSON.stringify({ success: true }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                 });
                 response.headers.set('Set-Cookie', clearSessionCookie());
                 return response;
@@ -608,7 +585,7 @@ export default {
                 if (!sessionId) {
                     return new Response(JSON.stringify({ success: false, error: '未登录' }), {
                         status: 401,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                 }
 
@@ -616,7 +593,7 @@ export default {
                 if (!sessionResult) {
                     return new Response(JSON.stringify({ success: false, error: 'Session 无效' }), {
                         status: 401,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                 }
 
@@ -625,16 +602,16 @@ export default {
                     if (!oldPassword || !newPassword || newPassword.length < 6) {
                         return new Response(JSON.stringify({ success: false, error: '密码格式错误' }), {
                             status: 400,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
 
                     const userFilePath = `${CONFIG.dataPath}user_${sessionResult.session.username}.json`;
-                    const userResult = await readGitHubFile(userFilePath, GITHUB_TOKEN);
+                    const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
                     if (!userResult) {
                         return new Response(JSON.stringify({ success: false, error: '用户不存在' }), {
                             status: 404,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
 
@@ -650,7 +627,7 @@ export default {
                     if (!oldValid) {
                         return new Response(JSON.stringify({ success: false, error: '旧密码错误' }), {
                             status: 401,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
 
@@ -659,17 +636,18 @@ export default {
                     userData.salt = newSalt;
                     userData.tokenVersion = (userData.tokenVersion || 1) + 1;
 
-                    await writeGitHubFile(userFilePath, userData, '修改密码', GITHUB_TOKEN, userResult.sha);
+                    await writeGitHubFile(userFilePath, userData, '修改密码', env.GITHUB_TOKEN, userResult.sha);
                     await cleanupUserSessions(env, userData.username);
 
                     return new Response(JSON.stringify({ success: true }), {
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
 
                 } catch (error) {
+                    console.error('/api/change-password error:', error.message);
                     return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
                         status: 500,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                 }
             }
@@ -677,7 +655,7 @@ export default {
             if (path === '/api/messages' && request.method === 'GET') {
                 const messages = await getMessages(env);
                 return new Response(JSON.stringify({ messages }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                 });
             }
 
@@ -687,13 +665,13 @@ export default {
                     if (!content || content.trim().length === 0) {
                         return new Response(JSON.stringify({ success: false, error: '留言内容不能为空' }), {
                             status: 400,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
                     if (content.length > 500) {
                         return new Response(JSON.stringify({ success: false, error: '留言内容不能超过500字' }), {
                             status: 400,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
 
@@ -708,24 +686,27 @@ export default {
                     if (!success) {
                         return new Response(JSON.stringify({ success: false, error: '保存失败' }), {
                             status: 500,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                            headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                         });
                     }
 
                     return new Response(JSON.stringify({ success: true, message: messageData }), {
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                 } catch (error) {
+                    console.error('/api/messages POST error:', error.message);
                     return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
                         status: 500,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
                     });
                 }
             }
 
             return new Response('Not Found', { status: 404 });
         } catch (error) {
-            return new Response(`Worker Error: ${error.message}\\nStack: ${error.stack}`, {
+            console.error('Worker top-level error:', error.message, error.stack);
+            return new Response(`Worker Error: ${error.message}
+Stack: ${error.stack}`, {
                 status: 500,
                 headers: { 'Content-Type': 'text/plain; charset=utf-8' }
             });
