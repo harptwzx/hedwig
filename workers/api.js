@@ -251,7 +251,7 @@ async function serveStaticFile(path) {
     try {
         const response = await fetch(url);
         if (response.ok) {
-            const content = await response.text();
+            const content = await response.arrayBuffer();
             let contentType = 'text/html';
             if (path.endsWith('.css')) contentType = 'text/css';
             if (path.endsWith('.js')) contentType = 'application/javascript';
@@ -264,6 +264,15 @@ async function serveStaticFile(path) {
         console.error('serveStaticFile error:', path, error.message);
     }
     return null;
+}
+
+// Helper: create redirect response with optional cookie
+function redirectResponse(location, cookie) {
+    const headers = { 'Location': location };
+    if (cookie) {
+        headers['Set-Cookie'] = cookie;
+    }
+    return new Response(null, { status: 302, headers });
 }
 
 export default {
@@ -298,16 +307,23 @@ export default {
             }
 
             if (path === '/auth/register') {
-                const username = url.searchParams.get('username');
-                const password = url.searchParams.get('password');
+                let username, password;
+                if (request.method === 'POST') {
+                    const body = await request.json();
+                    username = body.username;
+                    password = body.password;
+                } else {
+                    username = url.searchParams.get('username');
+                    password = url.searchParams.get('password');
+                }
                 if (!username || !password) {
-                    return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
+                    return redirectResponse(`${CONFIG.domain}/register.html?error=1`);
                 }
                 const stateData = { username, password, type: 'register' };
                 const state = base64Encode(JSON.stringify(stateData));
                 const redirectUri = `${CONFIG.domain}/auth/callback`;
                 const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-                return Response.redirect(authUrl, 302);
+                return redirectResponse(authUrl);
             }
 
             if (path === '/auth/login') {
@@ -315,14 +331,14 @@ export default {
                 const state = base64Encode(JSON.stringify(stateData));
                 const redirectUri = `${CONFIG.domain}/auth/callback`;
                 const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-                return Response.redirect(authUrl, 302);
+                return redirectResponse(authUrl);
             }
 
             if (path === '/auth/callback') {
                 const code = url.searchParams.get('code');
                 const stateParam = url.searchParams.get('state');
                 if (!code) {
-                    return Response.redirect(`${CONFIG.domain}/login.html?error=1`, 302);
+                    return redirectResponse(`${CONFIG.domain}/login.html?error=1`);
                 }
                 let state;
                 try {
@@ -366,19 +382,19 @@ export default {
                 if (state.type === 'register') {
                     const { username, password } = state;
                     if (!username || !password) {
-                        return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
+                        return redirectResponse(`${CONFIG.domain}/register.html?error=1`);
                     }
 
                     const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
                     const existingMapping = await readGitHubFile(githubMappingPath, env.GITHUB_TOKEN);
                     if (existingMapping) {
-                        return Response.redirect(`${CONFIG.domain}/register.html?error=2`, 302);
+                        return redirectResponse(`${CONFIG.domain}/register.html?error=2`);
                     }
 
                     const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
                     const existingUser = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
                     if (existingUser) {
-                        return Response.redirect(`${CONFIG.domain}/register.html?error=3`, 302);
+                        return redirectResponse(`${CONFIG.domain}/register.html?error=3`);
                     }
 
                     const salt = generateSalt();
@@ -401,22 +417,22 @@ export default {
                     const mappingWriteSuccess = await writeGitHubFile(githubMappingPath, { username: username, githubId: githubId }, `绑定 GitHub: ${username}`, env.GITHUB_TOKEN);
 
                     if (!userWriteSuccess || !mappingWriteSuccess) {
-                        return Response.redirect(`${CONFIG.domain}/register.html?error=4`, 302);
+                        return redirectResponse(`${CONFIG.domain}/register.html?error=4`);
                     }
-                    return Response.redirect(`${CONFIG.domain}/login.html?registered=1`, 302);
+                    return redirectResponse(`${CONFIG.domain}/login.html?registered=1`);
                 }
 
                 if (state.type === 'login') {
                     const githubMappingPath = `${CONFIG.dataPath}github_${githubId}.json`;
                     const mappingResult = await readGitHubFile(githubMappingPath, env.GITHUB_TOKEN);
                     if (!mappingResult) {
-                        return Response.redirect(`${CONFIG.domain}/login.html?error=2`, 302);
+                        return redirectResponse(`${CONFIG.domain}/login.html?error=2`);
                     }
 
                     const userFilePath = `${CONFIG.dataPath}user_${mappingResult.content.username}.json`;
                     const userResult = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
                     if (!userResult) {
-                        return Response.redirect(`${CONFIG.domain}/login.html?error=3`, 302);
+                        return redirectResponse(`${CONFIG.domain}/login.html?error=3`);
                     }
 
                     const userData = userResult.content;
@@ -431,12 +447,11 @@ export default {
 
                     await saveSession(env, sessionId, sessionData);
 
-                    const response = Response.redirect(`${CONFIG.domain}/dashboard.html`, 302);
-                    response.headers.set('Set-Cookie', setSessionCookie(sessionId));
-                    return response;
+                    // FIX: Use redirectResponse helper with cookie, instead of Response.redirect() + headers.set()
+                    return redirectResponse(`${CONFIG.domain}/dashboard.html`, setSessionCookie(sessionId));
                 }
 
-                return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);
+                return redirectResponse(`${CONFIG.domain}/login.html?error=4`);
             }
 
             if (path === '/api/login' && request.method === 'POST') {
@@ -501,11 +516,14 @@ export default {
                         redirect: '/dashboard.html'
                     };
 
-                    const response = new Response(JSON.stringify(responseData), {
-                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
+                    // FIX: Include Set-Cookie in initial headers, don't modify after creation
+                    return new Response(JSON.stringify(responseData), {
+                        headers: {
+                            ...corsHeaders(request),
+                            'Content-Type': 'application/json',
+                            'Set-Cookie': setSessionCookie(sessionId)
+                        }
                     });
-                    response.headers.set('Set-Cookie', setSessionCookie(sessionId));
-                    return response;
 
                 } catch (error) {
                     console.error('/api/login error:', error.message);
@@ -530,11 +548,14 @@ export default {
 
                 const sessionResult = await getSession(env, sessionId);
                 if (!sessionResult) {
-                    const response = new Response(JSON.stringify({ user: null }), {
-                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
+                    // FIX: Include Set-Cookie in initial headers
+                    return new Response(JSON.stringify({ user: null }), {
+                        headers: {
+                            ...corsHeaders(request),
+                            'Content-Type': 'application/json',
+                            'Set-Cookie': clearSessionCookie()
+                        }
                     });
-                    response.headers.set('Set-Cookie', clearSessionCookie());
-                    return response;
                 }
 
                 const session = sessionResult.session;
@@ -552,11 +573,14 @@ export default {
 
                 if (session.tokenVersion !== (userData.tokenVersion || 1)) {
                     await deleteSession(env, sessionId);
-                    const response = new Response(JSON.stringify({ user: null }), {
-                        headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
+                    // FIX: Include Set-Cookie in initial headers
+                    return new Response(JSON.stringify({ user: null }), {
+                        headers: {
+                            ...corsHeaders(request),
+                            'Content-Type': 'application/json',
+                            'Set-Cookie': clearSessionCookie()
+                        }
                     });
-                    response.headers.set('Set-Cookie', clearSessionCookie());
-                    return response;
                 }
 
                 return new Response(JSON.stringify({
@@ -573,11 +597,14 @@ export default {
                 if (sessionId) {
                     await deleteSession(env, sessionId);
                 }
-                const response = new Response(JSON.stringify({ success: true }), {
-                    headers: { ...corsHeaders(request), 'Content-Type': 'application/json' }
+                // FIX: Include Set-Cookie in initial headers
+                return new Response(JSON.stringify({ success: true }), {
+                    headers: {
+                        ...corsHeaders(request),
+                        'Content-Type': 'application/json',
+                        'Set-Cookie': clearSessionCookie()
+                    }
                 });
-                response.headers.set('Set-Cookie', clearSessionCookie());
-                return response;
             }
 
             if (path === '/api/change-password' && request.method === 'POST') {
@@ -705,8 +732,7 @@ export default {
             return new Response('Not Found', { status: 404 });
         } catch (error) {
             console.error('Worker top-level error:', error.message, error.stack);
-            return new Response(`Worker Error: ${error.message}
-Stack: ${error.stack}`, {
+            return new Response(`Worker Error: ${error.message}\nStack: ${error.stack}`, {
                 status: 500,
                 headers: { 'Content-Type': 'text/plain; charset=utf-8' }
             });
