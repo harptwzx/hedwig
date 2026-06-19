@@ -348,3 +348,139 @@ footer {
         gap: 5px;
     }
 }
+
+/* ===== 留言板折叠/展开样式 ===== */
+.board-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 0 20px;
+}
+
+.btn-toggle {
+    background: rgba(124, 140, 255, 0.1);
+    border: 1px solid rgba(124, 140, 255, 0.3);
+    color: #7c8cff;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+    margin-left: 15px;
+}
+
+.btn-toggle:hover {
+    background: rgba(124, 140, 255, 0.2);
+    border-color: #7c8cff;
+}
+
+.btn-toggle svg {
+    transition: transform 0.3s ease;
+}
+
+.btn-toggle.expanded svg {
+    transform: rotate(180deg);
+}
+
+.board-content {
+    overflow: hidden;
+    transition: max-height 0.5s ease, opacity 0.3s ease;
+    max-height: 2000px;
+    opacity: 1;
+}
+
+.board-content.collapsed {
+    max-height: 0;
+    opacity: 0;
+}
+
+
+#################################
+
+/* 折叠模式下的精简列表 */
+.message-list.compact {
+    max-height: 320px;
+    overflow: hidden;
+    position: relative;
+}
+
+.message-list.compact::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: linear-gradient(transparent, #0f0f23);
+    pointer-events: none;
+}
+
+/* 展开全部按钮 */
+.expand-hint {
+    text-align: center;
+    padding: 15px;
+    color: #7c8cff;
+    cursor: pointer;
+    font-size: 14px;
+    transition: color 0.2s;
+}
+
+.expand-hint:hover {
+    color: #9aaaff;
+}
+
+.expand-hint svg {
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+/* 分页样式 */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    margin-top: 25px;
+    padding: 15px 0;
+}
+
+.btn-page {
+    padding: 8px 18px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #1a1a2e;
+    color: #ccc;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.btn-page:hover:not(:disabled) {
+    background: #7c8cff;
+    border-color: #7c8cff;
+    color: white;
+}
+
+.btn-page:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+#pageInfo {
+    color: #888;
+    font-size: 14px;
+    min-width: 80px;
+    text-align: center;
+}
+
+/* 空状态 */
+.no-messages {
+    text-align: center;
+    color: #666;
+    padding: 40px 20px;
+    font-size: 14px;
+}
