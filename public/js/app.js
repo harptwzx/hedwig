@@ -31,7 +31,7 @@ function showCookieConsent() {
                 <h2 style="margin: 0 0 15px 0; color: #7c8cff;">Cookie 使用提示</h2>
                 <p style="margin: 0 0 25px 0; line-height: 1.6; font-size: 14px; color: #aaa;">
                     本网站使用 Cookie 来保存您的登录状态。<br>
-                    没有 Cookie，您将无法登录和使用个性化功能。
+                    没有 Cookie，您将无法登录 和使用个性化功能。
                 </p>
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     <button id="accept-cookie" style="
@@ -69,7 +69,7 @@ function showCookieConsent() {
                 <div style="text-align: center; color: #666;">
                     <div style="font-size: 64px; margin-bottom: 20px;"></div>
                     <h1 style="color: #7c8cff; margin-bottom: 15px;">访问已关闭</h1>
-                    <p>您拒绝了 Cookie 使用，无法继续访问。</p>
+                    <p>您拒绝了 Cookie 使用， 无法继续访问。</p>
                     <p style="font-size: 13px; margin-top: 20px;">请开启浏览器 Cookie 后刷新页面</p>
                 </div>
             </div>
@@ -141,7 +141,7 @@ function renderNav() {
     if (currentUser) {
         navLinks.innerHTML = `
             <span class="user-info">欢迎, ${currentUser.username}</span>
-            <button onclick="logout()">退出登录</button>
+            <button onclick="logout()">退出登 录</button>
         `;
     } else {
         navLinks.innerHTML = `
@@ -171,7 +171,7 @@ function handleUrlParams() {
     const messageEl = document.getElementById('message');
     if (!messageEl) return;
     if (registered === '1') {
-        messageEl.textContent = '注册成功！请登录';
+        messageEl.textContent = '注册成功！请 登录';
         messageEl.className = 'message success';
         messageEl.style.display = 'block';
         setTimeout(() => { messageEl.style.display = 'none'; }, 3000);
@@ -277,10 +277,40 @@ function displayUsername() {
     }
 }
 
+// 留言板状态
+let allMessages = [];
+let currentPage = 1;
+let isExpanded = false;
+const PAGE_SIZE = 10;
+const COMPACT_COUNT = 3;
+
 function initMessageBoard() {
     const msgForm = document.getElementById('messageForm');
     const msgList = document.getElementById('messageList');
+    const toggleBtn = document.getElementById('toggleBoardBtn');
+    const boardContent = document.getElementById('boardContent');
+
     if (!msgForm || !msgList) return;
+
+    // 折叠/展开切换
+    if (toggleBtn && boardContent) {
+        toggleBtn.addEventListener('click', () => {
+            isExpanded = !isExpanded;
+            toggleBtn.classList.toggle('expanded', isExpanded);
+            boardContent.classList.toggle('collapsed', !isExpanded);
+            if (isExpanded) {
+                renderMessages();
+            } else {
+                renderCompactMessages();
+            }
+        });
+    }
+
+    // 分页按钮
+    const prevBtn = document.getElementById('prevPage');
+    const nextBtn = document.getElementById('nextPage');
+    if (prevBtn) prevBtn.addEventListener('click', () => changePage(-1));
+    if (nextBtn) nextBtn.addEventListener('click', () => changePage(1));
 
     loadMessages();
 
@@ -309,7 +339,13 @@ function initMessageBoard() {
             const data = await response.json();
             if (data.success) {
                 contentInput.value = '';
-                loadMessages();
+                // 发送后自动展开并跳到第一页
+                if (!isExpanded && toggleBtn) {
+                    toggleBtn.click();
+                } else {
+                    currentPage = 1;
+                    await loadMessages();
+                }
             } else {
                 alert(data.error || '发送失败');
             }
@@ -331,24 +367,95 @@ async function loadMessages() {
     try {
         const response = await fetch('/api/messages');
         const data = await response.json();
-        const messages = data.messages || [];
+        allMessages = data.messages || [];
 
-        if (messages.length === 0) {
+        if (allMessages.length === 0) {
             msgList.innerHTML = '<div class="no-messages">还没有留言，来写第一条吧 </div>';
+            document.getElementById('pagination').style.display = 'none';
             return;
         }
 
-        msgList.innerHTML = messages.map(msg => `
-            <div class="message-item">
-                <div class="message-header">
-                    <span class="message-name">${escapeHtml(msg.name)}</span>
-                    <span class="message-time">${formatTime(msg.timestamp)}</span>
-                </div>
-                <div class="message-content">${escapeHtml(msg.content)}</div>
-            </div>
-        `).join('');
+        if (isExpanded) {
+            renderMessages();
+        } else {
+            renderCompactMessages();
+        }
     } catch (error) {
         msgList.innerHTML = '<div class="no-messages">加载失败，请刷新重试</div>';
+    }
+}
+
+function renderCompactMessages() {
+    const msgList = document.getElementById('messageList');
+    const pagination = document.getElementById('pagination');
+    if (!msgList) return;
+
+    const displayMessages = allMessages.slice(0, COMPACT_COUNT);
+
+    msgList.classList.add('compact');
+    msgList.innerHTML = displayMessages.map(msg => createMessageHTML(msg)).join('');
+
+    // 如果还有更多，显示展开提示
+    if (allMessages.length > COMPACT_COUNT) {
+        const expandDiv = document.createElement('div');
+        expandDiv.className = 'expand-hint';
+        expandDiv.innerHTML = `还有 ${allMessages.length - COMPACT_COUNT} 条留言 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+        expandDiv.addEventListener('click', () => {
+            document.getElementById('toggleBoardBtn').click();
+        });
+        msgList.appendChild(expandDiv);
+    }
+
+    if (pagination) pagination.style.display = 'none';
+}
+
+function renderMessages() {
+    const msgList = document.getElementById('messageList');
+    const pagination = document.getElementById('pagination');
+    if (!msgList) return;
+
+    msgList.classList.remove('compact');
+
+    const totalPages = Math.ceil(allMessages.length / PAGE_SIZE);
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    const pageMessages = allMessages.slice(start, end);
+
+    msgList.innerHTML = pageMessages.map(msg => createMessageHTML(msg)).join('');
+
+    // 更新分页
+    if (pagination) {
+        if (totalPages > 1) {
+            pagination.style.display = 'flex';
+            document.getElementById('pageInfo').textContent = `${currentPage} / ${totalPages}`;
+            document.getElementById('prevPage').disabled = currentPage <= 1;
+            document.getElementById('nextPage').disabled = currentPage >= totalPages;
+        } else {
+            pagination.style.display = 'none';
+        }
+    }
+}
+
+function createMessageHTML(msg) {
+    return `
+        <div class="message-item">
+            <div class="message-header">
+                <span class="message-name">${escapeHtml(msg.name)}</span>
+                <span class="message-time">${formatTime(msg.timestamp)}</span>
+            </div>
+            <div class="message-content">${escapeHtml(msg.content)}</div>
+        </div>
+    `;
+}
+
+function changePage(delta) {
+    const totalPages = Math.ceil(allMessages.length / PAGE_SIZE);
+    const newPage = currentPage + delta;
+    if (newPage >= 1 && newPage <= totalPages) {
+        currentPage = newPage;
+        renderMessages();
+        // 滚动到留言列表顶部
+        document.getElementById('messageList').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
