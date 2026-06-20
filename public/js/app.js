@@ -280,25 +280,28 @@ function displayUsername() {
 // 留言板状态
 let allMessages = [];
 let currentPage = 1;
-let isExpanded = false;
-const PAGE_SIZE = 10;
-const COMPACT_COUNT = 3;
+let isListExpanded = false;
+const PAGE_SIZE = 5;
+const COMPACT_COUNT = 5;
 
 function initMessageBoard() {
     const msgForm = document.getElementById('messageForm');
     const msgList = document.getElementById('messageList');
-    const toggleBtn = document.getElementById('toggleBoardBtn');
-    const boardContent = document.getElementById('boardContent');
+    const toggleBtn = document.getElementById('toggleListBtn');
 
     if (!msgForm || !msgList) return;
 
-    // 折叠/展开切换
-    if (toggleBtn && boardContent) {
+    // 折叠/展开切换（只控制留言列表）
+    if (toggleBtn) {
         toggleBtn.addEventListener('click', () => {
-            isExpanded = !isExpanded;
-            toggleBtn.classList.toggle('expanded', isExpanded);
-            boardContent.classList.toggle('collapsed', !isExpanded);
-            if (isExpanded) {
+            isListExpanded = !isListExpanded;
+            toggleBtn.classList.toggle('expanded', isListExpanded);
+
+            const toggleText = document.getElementById('toggleListText');
+            if (toggleText) toggleText.textContent = isListExpanded ? '收起' : '展开';
+
+            if (isListExpanded) {
+                currentPage = 1;
                 renderMessages();
             } else {
                 renderCompactMessages();
@@ -339,13 +342,8 @@ function initMessageBoard() {
             const data = await response.json();
             if (data.success) {
                 contentInput.value = '';
-                // 发送后自动展开并跳到第一页
-                if (!isExpanded && toggleBtn) {
-                    toggleBtn.click();
-                } else {
-                    currentPage = 1;
-                    await loadMessages();
-                }
+                // 发送后保持当前状态，刷新列表
+                await loadMessages();
             } else {
                 alert(data.error || '发送失败');
             }
@@ -374,7 +372,7 @@ async function loadMessages() {
             return;
         }
 
-        if (isExpanded) {
+        if (isListExpanded) {
             renderMessages();
         } else {
             renderCompactMessages();
@@ -387,21 +385,28 @@ async function loadMessages() {
 function renderEmptyBoard() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
+    const toggleBtn = document.getElementById('toggleListBtn');
+
     if (!msgList) return;
 
     msgList.innerHTML = `
         <div class="empty-board">
             <div class="empty-icon">💬</div>
             <p>这里还没有留言</p>
-            <p class="empty-hint">写下第一条留言，开启交流吧</p>
+            <p class="empty-hint">在上方写下第一条留言，开启交流吧</p>
         </div>
     `;
+
     if (pagination) pagination.style.display = 'none';
+    if (toggleBtn) toggleBtn.style.display = 'none';
 }
 
 function renderCompactMessages() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
+    const toggleBtn = document.getElementById('toggleListBtn');
+    const toggleText = document.getElementById('toggleListText');
+
     if (!msgList) return;
 
     const displayMessages = allMessages.slice(0, COMPACT_COUNT);
@@ -409,15 +414,20 @@ function renderCompactMessages() {
     msgList.classList.add('compact');
     msgList.innerHTML = displayMessages.map(msg => createMessageHTML(msg)).join('');
 
-    // 如果还有更多，显示展开提示（放在第三条留言下方）
+    // 如果还有更多，显示展开提示
     if (allMessages.length > COMPACT_COUNT) {
         const expandDiv = document.createElement('div');
         expandDiv.className = 'expand-hint';
         expandDiv.innerHTML = `展开全部 ${allMessages.length} 条留言 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
         expandDiv.addEventListener('click', () => {
-            document.getElementById('toggleBoardBtn').click();
+            if (toggleBtn) toggleBtn.click();
         });
         msgList.appendChild(expandDiv);
+
+        if (toggleBtn) toggleBtn.style.display = 'flex';
+        if (toggleText) toggleText.textContent = '展开';
+    } else {
+        if (toggleBtn) toggleBtn.style.display = 'none';
     }
 
     if (pagination) pagination.style.display = 'none';
@@ -426,6 +436,9 @@ function renderCompactMessages() {
 function renderMessages() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
+    const toggleBtn = document.getElementById('toggleListBtn');
+    const toggleText = document.getElementById('toggleListText');
+
     if (!msgList) return;
 
     msgList.classList.remove('compact');
@@ -447,6 +460,11 @@ function renderMessages() {
         } else {
             pagination.style.display = 'none';
         }
+    }
+
+    if (toggleBtn) {
+        toggleBtn.style.display = 'flex';
+        if (toggleText) toggleText.textContent = '收起';
     }
 }
 

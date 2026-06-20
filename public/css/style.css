@@ -218,19 +218,57 @@ form {
     border-top: 1px solid #333;
 }
 
-.message-board h2 {
-    color: #fff;
-    margin-bottom: 10px;
+/* ===== 首页黄金比例布局（仅 index.html） ===== */
+.hero-section {
+    min-height: 38.2vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 20px 0;
 }
 
-.board-desc {
+.hero-section h1 {
+    font-size: 42px;
+    margin-bottom: 12px;
+}
+
+.hero-section .subtitle {
     color: #888;
+    margin-bottom: 28px;
+    font-size: 16px;
+}
+
+.hero-section #authButtons {
+    margin: 0;
+}
+
+.golden-board {
+    min-height: 61.8vh;
+    padding: 50px 0 40px;
+}
+
+/* ===== 留言板标题居中 ===== */
+.board-header-center {
+    text-align: center;
     margin-bottom: 30px;
 }
 
+.board-header-center h2 {
+    color: #fff;
+    margin-bottom: 8px;
+}
+
+.board-header-center .board-desc {
+    color: #888;
+    margin-bottom: 0;
+    font-size: 14px;
+}
+
+/* ===== 留言表单 ===== */
 .message-form {
     max-width: 600px;
-    margin: 0 auto 30px;
+    margin: 0 auto 40px;
     text-align: left;
     background: rgba(255,255,255,0.03);
     padding: 25px;
@@ -247,9 +285,57 @@ form {
     color: #666;
 }
 
-.message-list {
+/* ===== 留言列表区域 ===== */
+.message-list-section {
     max-width: 600px;
     margin: 0 auto;
+    text-align: left;
+}
+
+.list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 5px 15px;
+    border-bottom: 1px solid #2a2a3e;
+    margin-bottom: 15px;
+}
+
+.list-title {
+    color: #ccc;
+    font-size: 15px;
+    font-weight: 500;
+}
+
+.btn-toggle-list {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid rgba(124, 140, 255, 0.3);
+    background: rgba(124, 140, 255, 0.08);
+    color: #7c8cff;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s ease;
+}
+
+.btn-toggle-list:hover {
+    background: rgba(124, 140, 255, 0.15);
+    border-color: rgba(124, 140, 255, 0.5);
+}
+
+.btn-toggle-list svg {
+    transition: transform 0.3s ease;
+}
+
+.btn-toggle-list.expanded svg {
+    transform: rotate(180deg);
+}
+
+/* ===== 留言列表 ===== */
+.message-list {
     text-align: left;
 }
 
@@ -285,173 +371,44 @@ form {
     word-break: break-word;
 }
 
-.loading, .no-messages {
-    text-align: center;
-    color: #666;
-    padding: 30px;
-}
-
-footer {
-    text-align: center;
-    padding: 30px;
-    color: #555;
-    border-top: 1px solid #222;
-    margin-top: 40px;
-}
-
-/* ===== 首页黄金比例布局（仅 index.html） ===== */
-.hero-section {
-    min-height: 38.2vh;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    padding: 20px 0;
-}
-
-.hero-section h1 {
-    font-size: 42px;
-    margin-bottom: 12px;
-}
-
-.hero-section .subtitle {
-    color: #888;
-    margin-bottom: 28px;
-    font-size: 16px;
-}
-
-.hero-section #authButtons {
-    margin: 0;
-}
-
-.golden-board {
-    min-height: 61.8vh;
-    padding: 50px 0 40px;
-}
-
-@media (max-width: 600px) {
-    nav {
-        padding: 15px 20px;
-    }
-
-    h1 {
-        font-size: 28px;
-    }
-
-    .hero-section h1 {
-        font-size: 32px;
-    }
-
-    .message-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 5px;
-    }
-}
-
-/* ===== 留言板折叠/展开样式 ===== */
-.board-header {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 0 20px;
-    position: relative;
-}
-
-.board-title-wrap {
-    text-align: center;
-    flex: 1;
-}
-
-.board-title-wrap h2 {
-    color: #fff;
-    margin-bottom: 8px;
-}
-
-.board-title-wrap .board-desc {
-    color: #888;
-    margin-bottom: 0;
-    font-size: 14px;
-}
-
-.btn-toggle {
-    position: absolute;
-    right: 20px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: rgba(124, 140, 255, 0.1);
-    border: 1px solid rgba(124, 140, 255, 0.3);
-    color: #7c8cff;
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s ease;
-    flex-shrink: 0;
-}
-
-.btn-toggle:hover {
-    background: rgba(124, 140, 255, 0.2);
-    border-color: #7c8cff;
-}
-
-.btn-toggle svg {
-    transition: transform 0.3s ease;
-}
-
-.btn-toggle.expanded svg {
-    transform: rotate(180deg);
-}
-
-.board-content {
-    overflow: hidden;
-    transition: max-height 0.5s ease, opacity 0.3s ease;
-    max-height: 2000px;
-    opacity: 1;
-}
-
-.board-content.collapsed {
-    max-height: 0;
-    opacity: 0;
-}
-
-/* 折叠模式：从第三条留言处渐变 */
+/* ===== 折叠模式：只显示前5条，第5条后渐变 ===== */
 .message-list.compact {
     position: relative;
     overflow: hidden;
+    max-height: none;
 }
 
-/* 第三条留言之后的遮罩渐变 */
-.message-list.compact .message-item:nth-child(n+3) {
+.message-list.compact .message-item:nth-child(5) {
     position: relative;
 }
 
-.message-list.compact .message-item:nth-child(3)::after {
+.message-list.compact .message-item:nth-child(5)::after {
     content: '';
     position: absolute;
-    top: 100%;
+    bottom: 0;
     left: -20px;
     right: -20px;
-    height: 120px;
-    background: linear-gradient(to bottom, transparent, #0f0f23 80%);
+    height: 100px;
+    background: linear-gradient(to bottom, transparent, #0f0f23 70%);
     pointer-events: none;
     z-index: 2;
 }
 
-/* 展开全部按钮 */
+.message-list.compact .message-item:nth-child(n+6) {
+    display: none;
+}
+
+/* 展开提示（放在第5条下方） */
 .expand-hint {
     text-align: center;
-    padding: 20px 15px 10px;
+    padding: 15px;
     color: #7c8cff;
     cursor: pointer;
     font-size: 14px;
     transition: color 0.2s;
+    margin-top: -10px;
     position: relative;
     z-index: 3;
-    margin-top: -30px;
 }
 
 .expand-hint:hover {
@@ -468,7 +425,7 @@ footer {
     transform: translateY(2px);
 }
 
-/* 空留言板样式 */
+/* ===== 空留言板 ===== */
 .empty-board {
     text-align: center;
     padding: 50px 20px;
@@ -492,7 +449,7 @@ footer {
     font-size: 13px;
 }
 
-/* 分页样式 */
+/* ===== 分页 ===== */
 .pagination {
     display: flex;
     justify-content: center;
@@ -529,4 +486,42 @@ footer {
     font-size: 14px;
     min-width: 80px;
     text-align: center;
+}
+
+.loading, .no-messages {
+    text-align: center;
+    color: #666;
+    padding: 30px;
+}
+
+footer {
+    text-align: center;
+    padding: 30px;
+    color: #555;
+    border-top: 1px solid #222;
+    margin-top: 40px;
+}
+
+@media (max-width: 600px) {
+    nav {
+        padding: 15px 20px;
+    }
+
+    h1 {
+        font-size: 28px;
+    }
+
+    .hero-section h1 {
+        font-size: 32px;
+    }
+
+    .message-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+
+    .list-header {
+        padding: 0 0 15px;
+    }
 }

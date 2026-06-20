@@ -26,30 +26,33 @@
         </div>
 
         <div class="message-board golden-board" id="messageBoard">
-            <div class="board-header">
-                <div class="board-title-wrap">
-                    <h2>留言板</h2>
-                    <p class="board-desc">留下你的想法，与大家交流</p>
-                </div>
-                <button id="toggleBoardBtn" class="btn-toggle" title="展开/收起">
-                    <svg id="toggleIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                    </svg>
-                </button>
+            <div class="board-header-center">
+                <h2>留言板</h2>
+                <p class="board-desc">留下你的想法，与大家交流</p>
             </div>
 
-            <div id="boardContent" class="board-content collapsed">
-                <form id="messageForm" class="message-form">
-                    <div class="form-group">
-                        <input type="text" id="msgName" placeholder="你的名字（可选）" maxlength="30">
-                    </div>
-                    <div class="form-group">
-                        <textarea id="msgContent" rows="4" placeholder="写下你的留言..." maxlength="500" required></textarea>
-                    </div>
-                    <button type="submit" class="btn-primary">发送留言</button>
-                </form>
+            <form id="messageForm" class="message-form">
+                <div class="form-group">
+                    <input type="text" id="msgName" placeholder="你的名字（可选）" maxlength="30">
+                </div>
+                <div class="form-group">
+                    <textarea id="msgContent" rows="4" placeholder="写下你的留言..." maxlength="500" required></textarea>
+                </div>
+                <button type="submit" class="btn-primary">发送留言</button>
+            </form>
 
-                <div id="messageList" class="message-list">
+            <div class="message-list-section">
+                <div class="list-header">
+                    <span class="list-title">全部留言</span>
+                    <button id="toggleListBtn" class="btn-toggle-list">
+                        <span id="toggleListText">展开</span>
+                        <svg id="toggleListIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                </div>
+
+                <div id="messageList" class="message-list compact">
                     <div class="loading">加载中...</div>
                 </div>
 
