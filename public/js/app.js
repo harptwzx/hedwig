@@ -277,25 +277,26 @@ function displayUsername() {
     }
 }
 
-// 留言板状态
+// ===== 留言板 =====
 let allMessages = [];
 let currentPage = 1;
 let isListExpanded = false;
 const PAGE_SIZE = 5;
-const COMPACT_COUNT = 5;
 
 function initMessageBoard() {
     const msgForm = document.getElementById('messageForm');
     const msgList = document.getElementById('messageList');
     const toggleBtn = document.getElementById('toggleListBtn');
+    const listArea = document.getElementById('listArea');
 
     if (!msgForm || !msgList) return;
 
-    // 折叠/展开切换（只控制留言列表）
-    if (toggleBtn) {
+    // 展开/收起切换（控制整个 listArea：留言列表 + 分页）
+    if (toggleBtn && listArea) {
         toggleBtn.addEventListener('click', () => {
             isListExpanded = !isListExpanded;
             toggleBtn.classList.toggle('expanded', isListExpanded);
+            listArea.classList.toggle('collapsed', !isListExpanded);
 
             const toggleText = document.getElementById('toggleListText');
             if (toggleText) toggleText.textContent = isListExpanded ? '收起' : '展开';
@@ -303,8 +304,6 @@ function initMessageBoard() {
             if (isListExpanded) {
                 currentPage = 1;
                 renderMessages();
-            } else {
-                renderCompactMessages();
             }
         });
     }
@@ -342,8 +341,12 @@ function initMessageBoard() {
             const data = await response.json();
             if (data.success) {
                 contentInput.value = '';
-                // 发送后保持当前状态，刷新列表
                 await loadMessages();
+                // 发送后如果列表是收起的，保持收起；如果展开，保持展开并跳到第一页
+                if (isListExpanded) {
+                    currentPage = 1;
+                    renderMessages();
+                }
             } else {
                 alert(data.error || '发送失败');
             }
@@ -358,6 +361,10 @@ function initMessageBoard() {
 
 async function loadMessages() {
     const msgList = document.getElementById('messageList');
+    const listArea = document.getElementById('listArea');
+    const toggleBtn = document.getElementById('toggleListBtn');
+    const listCount = document.getElementById('listCount');
+
     if (!msgList) return;
 
     msgList.innerHTML = '<div class="loading">加载中...</div>';
@@ -367,14 +374,24 @@ async function loadMessages() {
         const data = await response.json();
         allMessages = data.messages || [];
 
+        // 更新留言数量显示
+        if (listCount) {
+            listCount.textContent = allMessages.length > 0 ? `共 ${allMessages.length} 条留言` : '';
+        }
+
         if (allMessages.length === 0) {
             renderEmptyBoard();
+            if (toggleBtn) toggleBtn.style.display = 'none';
+            if (listArea) listArea.classList.add('collapsed');
             return;
         }
+
+        if (toggleBtn) toggleBtn.style.display = 'flex';
 
         if (isListExpanded) {
             renderMessages();
         } else {
+            // 收起状态：只显示最近5条，无分页
             renderCompactMessages();
         }
     } catch (error) {
@@ -385,7 +402,6 @@ async function loadMessages() {
 function renderEmptyBoard() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
-    const toggleBtn = document.getElementById('toggleListBtn');
 
     if (!msgList) return;
 
@@ -396,52 +412,26 @@ function renderEmptyBoard() {
             <p class="empty-hint">在上方写下第一条留言，开启交流吧</p>
         </div>
     `;
-
     if (pagination) pagination.style.display = 'none';
-    if (toggleBtn) toggleBtn.style.display = 'none';
 }
 
 function renderCompactMessages() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
-    const toggleBtn = document.getElementById('toggleListBtn');
-    const toggleText = document.getElementById('toggleListText');
 
     if (!msgList) return;
 
-    const displayMessages = allMessages.slice(0, COMPACT_COUNT);
-
-    msgList.classList.add('compact');
+    // 收起状态：只显示最近5条，不显示分页
+    const displayMessages = allMessages.slice(0, PAGE_SIZE);
     msgList.innerHTML = displayMessages.map(msg => createMessageHTML(msg)).join('');
-
-    // 如果还有更多，显示展开提示
-    if (allMessages.length > COMPACT_COUNT) {
-        const expandDiv = document.createElement('div');
-        expandDiv.className = 'expand-hint';
-        expandDiv.innerHTML = `展开全部 ${allMessages.length} 条留言 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
-        expandDiv.addEventListener('click', () => {
-            if (toggleBtn) toggleBtn.click();
-        });
-        msgList.appendChild(expandDiv);
-
-        if (toggleBtn) toggleBtn.style.display = 'flex';
-        if (toggleText) toggleText.textContent = '展开';
-    } else {
-        if (toggleBtn) toggleBtn.style.display = 'none';
-    }
-
     if (pagination) pagination.style.display = 'none';
 }
 
 function renderMessages() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
-    const toggleBtn = document.getElementById('toggleListBtn');
-    const toggleText = document.getElementById('toggleListText');
 
     if (!msgList) return;
-
-    msgList.classList.remove('compact');
 
     const totalPages = Math.ceil(allMessages.length / PAGE_SIZE);
     const start = (currentPage - 1) * PAGE_SIZE;
@@ -460,11 +450,6 @@ function renderMessages() {
         } else {
             pagination.style.display = 'none';
         }
-    }
-
-    if (toggleBtn) {
-        toggleBtn.style.display = 'flex';
-        if (toggleText) toggleText.textContent = '收起';
     }
 }
 

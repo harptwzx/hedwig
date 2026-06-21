@@ -41,9 +41,9 @@
                 <button type="submit" class="btn-primary">发送留言</button>
             </form>
 
-            <div class="message-list-section">
-                <div class="list-header">
-                    <span class="list-title">全部留言</span>
+            <div class="message-list-wrap">
+                <div class="list-header-bar">
+                    <span class="list-count" id="listCount"></span>
                     <button id="toggleListBtn" class="btn-toggle-list">
                         <span id="toggleListText">展开</span>
                         <svg id="toggleListIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -52,14 +52,16 @@
                     </button>
                 </div>
 
-                <div id="messageList" class="message-list compact">
-                    <div class="loading">加载中...</div>
-                </div>
+                <div id="listArea" class="list-area collapsed">
+                    <div id="messageList" class="message-list">
+                        <div class="loading">加载中...</div>
+                    </div>
 
-                <div id="pagination" class="pagination" style="display:none;">
-                    <button id="prevPage" class="btn-page">上一页</button>
-                    <span id="pageInfo"></span>
-                    <button id="nextPage" class="btn-page">下一页</button>
+                    <div id="pagination" class="pagination" style="display:none;">
+                        <button id="prevPage" class="btn-page">上一页</button>
+                        <span id="pageInfo"></span>
+                        <button id="nextPage" class="btn-page">下一页</button>
+                    </div>
                 </div>
             </div>
         </div>

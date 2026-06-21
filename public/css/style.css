@@ -286,13 +286,13 @@ form {
 }
 
 /* ===== 留言列表区域 ===== */
-.message-list-section {
+.message-list-wrap {
     max-width: 600px;
     margin: 0 auto;
     text-align: left;
 }
 
-.list-header {
+.list-header-bar {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -301,10 +301,9 @@ form {
     margin-bottom: 15px;
 }
 
-.list-title {
-    color: #ccc;
-    font-size: 15px;
-    font-weight: 500;
+.list-count {
+    color: #888;
+    font-size: 14px;
 }
 
 .btn-toggle-list {
@@ -332,6 +331,19 @@ form {
 
 .btn-toggle-list.expanded svg {
     transform: rotate(180deg);
+}
+
+/* ===== 列表区域（可折叠） ===== */
+.list-area {
+    overflow: hidden;
+    transition: max-height 0.5s ease, opacity 0.3s ease;
+    max-height: 2000px;
+    opacity: 1;
+}
+
+.list-area.collapsed {
+    max-height: 0;
+    opacity: 0;
 }
 
 /* ===== 留言列表 ===== */
@@ -369,60 +381,6 @@ form {
     color: #ccc;
     line-height: 1.6;
     word-break: break-word;
-}
-
-/* ===== 折叠模式：只显示前5条，第5条后渐变 ===== */
-.message-list.compact {
-    position: relative;
-    overflow: hidden;
-    max-height: none;
-}
-
-.message-list.compact .message-item:nth-child(5) {
-    position: relative;
-}
-
-.message-list.compact .message-item:nth-child(5)::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: -20px;
-    right: -20px;
-    height: 100px;
-    background: linear-gradient(to bottom, transparent, #0f0f23 70%);
-    pointer-events: none;
-    z-index: 2;
-}
-
-.message-list.compact .message-item:nth-child(n+6) {
-    display: none;
-}
-
-/* 展开提示（放在第5条下方） */
-.expand-hint {
-    text-align: center;
-    padding: 15px;
-    color: #7c8cff;
-    cursor: pointer;
-    font-size: 14px;
-    transition: color 0.2s;
-    margin-top: -10px;
-    position: relative;
-    z-index: 3;
-}
-
-.expand-hint:hover {
-    color: #9aaaff;
-}
-
-.expand-hint svg {
-    vertical-align: middle;
-    margin-left: 4px;
-    transition: transform 0.2s;
-}
-
-.expand-hint:hover svg {
-    transform: translateY(2px);
 }
 
 /* ===== 空留言板 ===== */
@@ -521,7 +479,7 @@ footer {
         gap: 5px;
     }
 
-    .list-header {
+    .list-header-bar {
         padding: 0 0 15px;
     }
 }
