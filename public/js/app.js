@@ -31,7 +31,7 @@ function showCookieConsent() {
                 <h2 style="margin: 0 0 15px 0; color: #7c8cff;">Cookie 使用提示</h2>
                 <p style="margin: 0 0 25px 0; line-height: 1.6; font-size: 14px; color: #aaa;">
                     本网站使用 Cookie 来保存您的登录状态。<br>
-                    没有 Cookie，您将无法登录和使用个性化功能。
+                    没有 Cookie，您将无法登录 和使用个性化功能。
                 </p>
                 <div style="display: flex; gap: 12px; justify-content: center;">
                     <button id="accept-cookie" style="
@@ -69,7 +69,7 @@ function showCookieConsent() {
                 <div style="text-align: center; color: #666;">
                     <div style="font-size: 64px; margin-bottom: 20px;"></div>
                     <h1 style="color: #7c8cff; margin-bottom: 15px;">访问已关闭</h1>
-                    <p>您拒绝了 Cookie 使用，无法继续访问。</p>
+                    <p>您拒绝了 Cookie 使用， 无法继续访问。</p>
                     <p style="font-size: 13px; margin-top: 20px;">请开启浏览器 Cookie 后刷新页面</p>
                 </div>
             </div>
@@ -141,7 +141,7 @@ function renderNav() {
     if (currentUser) {
         navLinks.innerHTML = `
             <span class="user-info">欢迎, ${currentUser.username}</span>
-            <button onclick="logout()">退出登录</button>
+            <button onclick="logout()">退出登 录</button>
         `;
     } else {
         navLinks.innerHTML = `
@@ -171,7 +171,7 @@ function handleUrlParams() {
     const messageEl = document.getElementById('message');
     if (!messageEl) return;
     if (registered === '1') {
-        messageEl.textContent = '注册成功！请登录';
+        messageEl.textContent = '注册成功！请 登录';
         messageEl.className = 'message success';
         messageEl.style.display = 'block';
         setTimeout(() => { messageEl.style.display = 'none'; }, 3000);
@@ -277,33 +277,31 @@ function displayUsername() {
     }
 }
 
-// ===== 留言板 =====
+// 留言板状态
 let allMessages = [];
 let currentPage = 1;
-let isListExpanded = false;
-const PAGE_SIZE = 5;
+let isExpanded = false;
+const PAGE_SIZE = 10;
+const COMPACT_COUNT = 3;
 
 function initMessageBoard() {
     const msgForm = document.getElementById('messageForm');
     const msgList = document.getElementById('messageList');
-    const toggleBtn = document.getElementById('toggleListBtn');
-    const listArea = document.getElementById('listArea');
+    const toggleBtn = document.getElementById('toggleBoardBtn');
+    const boardContent = document.getElementById('boardContent');
 
     if (!msgForm || !msgList) return;
 
-    // 展开/收起切换（控制整个 listArea：留言列表 + 分页）
-    if (toggleBtn && listArea) {
+    // 折叠/展开切换
+    if (toggleBtn && boardContent) {
         toggleBtn.addEventListener('click', () => {
-            isListExpanded = !isListExpanded;
-            toggleBtn.classList.toggle('expanded', isListExpanded);
-            listArea.classList.toggle('collapsed', !isListExpanded);
-
-            const toggleText = document.getElementById('toggleListText');
-            if (toggleText) toggleText.textContent = isListExpanded ? '收起' : '展开';
-
-            if (isListExpanded) {
-                currentPage = 1;
+            isExpanded = !isExpanded;
+            toggleBtn.classList.toggle('expanded', isExpanded);
+            boardContent.classList.toggle('collapsed', !isExpanded);
+            if (isExpanded) {
                 renderMessages();
+            } else {
+                renderCompactMessages();
             }
         });
     }
@@ -341,11 +339,12 @@ function initMessageBoard() {
             const data = await response.json();
             if (data.success) {
                 contentInput.value = '';
-                await loadMessages();
-                // 发送后如果列表是收起的，保持收起；如果展开，保持展开并跳到第一页
-                if (isListExpanded) {
+                // 发送后自动展开并跳到第一页
+                if (!isExpanded && toggleBtn) {
+                    toggleBtn.click();
+                } else {
                     currentPage = 1;
-                    renderMessages();
+                    await loadMessages();
                 }
             } else {
                 alert(data.error || '发送失败');
@@ -361,10 +360,6 @@ function initMessageBoard() {
 
 async function loadMessages() {
     const msgList = document.getElementById('messageList');
-    const listArea = document.getElementById('listArea');
-    const toggleBtn = document.getElementById('toggleListBtn');
-    const listCount = document.getElementById('listCount');
-
     if (!msgList) return;
 
     msgList.innerHTML = '<div class="loading">加载中...</div>';
@@ -374,24 +369,15 @@ async function loadMessages() {
         const data = await response.json();
         allMessages = data.messages || [];
 
-        // 更新留言数量显示
-        if (listCount) {
-            listCount.textContent = allMessages.length > 0 ? `共 ${allMessages.length} 条留言` : '';
-        }
-
         if (allMessages.length === 0) {
-            renderEmptyBoard();
-            if (toggleBtn) toggleBtn.style.display = 'none';
-            if (listArea) listArea.classList.add('collapsed');
+            msgList.innerHTML = '<div class="no-messages">还没有留言，来写第一条吧 </div>';
+            document.getElementById('pagination').style.display = 'none';
             return;
         }
 
-        if (toggleBtn) toggleBtn.style.display = 'flex';
-
-        if (isListExpanded) {
+        if (isExpanded) {
             renderMessages();
         } else {
-            // 收起状态：只显示最近5条，无分页
             renderCompactMessages();
         }
     } catch (error) {
@@ -399,39 +385,36 @@ async function loadMessages() {
     }
 }
 
-function renderEmptyBoard() {
-    const msgList = document.getElementById('messageList');
-    const pagination = document.getElementById('pagination');
-
-    if (!msgList) return;
-
-    msgList.innerHTML = `
-        <div class="empty-board">
-            <div class="empty-icon">💬</div>
-            <p>这里还没有留言</p>
-            <p class="empty-hint">在上方写下第一条留言，开启交流吧</p>
-        </div>
-    `;
-    if (pagination) pagination.style.display = 'none';
-}
-
 function renderCompactMessages() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
-
     if (!msgList) return;
 
-    // 收起状态：只显示最近5条，不显示分页
-    const displayMessages = allMessages.slice(0, PAGE_SIZE);
+    const displayMessages = allMessages.slice(0, COMPACT_COUNT);
+
+    msgList.classList.add('compact');
     msgList.innerHTML = displayMessages.map(msg => createMessageHTML(msg)).join('');
+
+    // 如果还有更多，显示展开提示
+    if (allMessages.length > COMPACT_COUNT) {
+        const expandDiv = document.createElement('div');
+        expandDiv.className = 'expand-hint';
+        expandDiv.innerHTML = `还有 ${allMessages.length - COMPACT_COUNT} 条留言 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+        expandDiv.addEventListener('click', () => {
+            document.getElementById('toggleBoardBtn').click();
+        });
+        msgList.appendChild(expandDiv);
+    }
+
     if (pagination) pagination.style.display = 'none';
 }
 
 function renderMessages() {
     const msgList = document.getElementById('messageList');
     const pagination = document.getElementById('pagination');
-
     if (!msgList) return;
+
+    msgList.classList.remove('compact');
 
     const totalPages = Math.ceil(allMessages.length / PAGE_SIZE);
     const start = (currentPage - 1) * PAGE_SIZE;
