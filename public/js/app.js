@@ -245,10 +245,10 @@ async function handleRegister(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
-        if (response.redirected) {
-            window.location.href = response.url;
+        const data = await response.json();
+        if (response.ok && data.success && data.authUrl) {
+            window.location.href = data.authUrl;
         } else {
-            const data = await response.json();
             showMessage(messageEl, data.error || '注册失败', 'error');
         }
     } catch (error) {
@@ -277,7 +277,6 @@ function displayUsername() {
     }
 }
 
-// ===== 留言板 =====
 let allMessages = [];
 let currentPage = 1;
 let isListExpanded = false;
@@ -291,7 +290,6 @@ function initMessageBoard() {
 
     if (!msgForm || !msgList) return;
 
-    // 展开/收起切换（控制整个 listArea：留言列表 + 分页）
     if (toggleBtn && listArea) {
         toggleBtn.addEventListener('click', () => {
             isListExpanded = !isListExpanded;
@@ -308,7 +306,6 @@ function initMessageBoard() {
         });
     }
 
-    // 分页按钮
     const prevBtn = document.getElementById('prevPage');
     const nextBtn = document.getElementById('nextPage');
     if (prevBtn) prevBtn.addEventListener('click', () => changePage(-1));
@@ -342,7 +339,6 @@ function initMessageBoard() {
             if (data.success) {
                 contentInput.value = '';
                 await loadMessages();
-                // 发送后如果列表是收起的，保持收起；如果展开，保持展开并跳到第一页
                 if (isListExpanded) {
                     currentPage = 1;
                     renderMessages();
@@ -374,7 +370,6 @@ async function loadMessages() {
         const data = await response.json();
         allMessages = data.messages || [];
 
-        // 更新留言数量显示
         if (listCount) {
             listCount.textContent = allMessages.length > 0 ? `共 ${allMessages.length} 条留言` : '';
         }
@@ -391,7 +386,6 @@ async function loadMessages() {
         if (isListExpanded) {
             renderMessages();
         } else {
-            // 收起状态：只显示最近5条，无分页
             renderCompactMessages();
         }
     } catch (error) {
@@ -421,7 +415,6 @@ function renderCompactMessages() {
 
     if (!msgList) return;
 
-    // 收起状态：只显示最近5条，不显示分页
     const displayMessages = allMessages.slice(0, PAGE_SIZE);
     msgList.innerHTML = displayMessages.map(msg => createMessageHTML(msg)).join('');
     if (pagination) pagination.style.display = 'none';
@@ -440,7 +433,6 @@ function renderMessages() {
 
     msgList.innerHTML = pageMessages.map(msg => createMessageHTML(msg)).join('');
 
-    // 更新分页
     if (pagination) {
         if (totalPages > 1) {
             pagination.style.display = 'flex';
@@ -471,7 +463,6 @@ function changePage(delta) {
     if (newPage >= 1 && newPage <= totalPages) {
         currentPage = newPage;
         renderMessages();
-        // 滚动到留言列表顶部
         document.getElementById('messageList').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
