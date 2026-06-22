@@ -287,11 +287,21 @@ export default {
                 if (res) return res;
             }
 
-            if (path === '/auth/register') {
-                const username = url.searchParams.get('username');
-                const password = url.searchParams.get('password');
+            if (path === '/auth/register' && request.method === 'POST') {
+                let username, password;
+                try {
+                    const body = await request.json();
+                    username = body.username;
+                    password = body.password;
+                } catch (e) {
+                    username = url.searchParams.get('username');
+                    password = url.searchParams.get('password');
+                }
                 if (!username || !password) {
-                    return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
+                    return new Response(JSON.stringify({ success: false, error: '用户名和密码不能为空' }), {
+                        status: 400,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
                 }
                 const stateData = { username, password, type: 'register' };
                 const state = base64Encode(JSON.stringify(stateData));
@@ -691,8 +701,7 @@ export default {
 
             return new Response('Not Found', { status: 404 });
         } catch (error) {
-            return new Response(`Worker Error: ${error.message}
-Stack: ${error.stack}`, {
+            return new Response(`Worker Error: ${error.message}\nStack: ${error.stack}`, {
                 status: 500,
                 headers: { 'Content-Type': 'text/plain; charset=utf-8' }
             });
