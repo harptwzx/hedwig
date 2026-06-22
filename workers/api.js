@@ -307,7 +307,9 @@ export default {
                 const state = base64Encode(JSON.stringify(stateData));
                 const redirectUri = `${CONFIG.domain}/auth/callback`;
                 const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-                return Response.redirect(authUrl, 302);
+                return new Response(JSON.stringify({ success: true, authUrl: authUrl }), {
+                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                });
             }
 
             if (path === '/auth/login') {
@@ -701,7 +703,8 @@ export default {
 
             return new Response('Not Found', { status: 404 });
         } catch (error) {
-            return new Response(`Worker Error: ${error.message}\nStack: ${error.stack}`, {
+            return new Response(`Worker Error: ${error.message}
+Stack: ${error.stack}`, {
                 status: 500,
                 headers: { 'Content-Type': 'text/plain; charset=utf-8' }
             });
