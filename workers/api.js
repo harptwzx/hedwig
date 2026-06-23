@@ -317,7 +317,9 @@ export default {
                 const state = base64Encode(JSON.stringify(stateData));
                 const redirectUri = `${CONFIG.domain}/auth/callback`;
                 const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-                return Response.redirect(authUrl, 302);
+                return new Response(JSON.stringify({ success: true, authUrl: authUrl }), {
+                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                });
             }
 
             if (path === '/auth/callback') {
@@ -433,9 +435,13 @@ export default {
 
                     await saveSession(env, sessionId, sessionData);
 
-                    const response = Response.redirect(`${CONFIG.domain}/dashboard.html`, 302);
-                    response.headers.set('Set-Cookie', setSessionCookie(sessionId));
-                    return response;
+                    return new Response(null, {
+                        status: 302,
+                        headers: {
+                            'Location': `${CONFIG.domain}/dashboard.html`,
+                            'Set-Cookie': setSessionCookie(sessionId)
+                        }
+                    });
                 }
 
                 return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);

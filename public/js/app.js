@@ -193,6 +193,8 @@ function initForms() {
     if (loginForm) loginForm.addEventListener('submit', handleLogin);
     const registerForm = document.getElementById('registerForm');
     if (registerForm) registerForm.addEventListener('submit', handleRegister);
+    const githubLoginBtn = document.getElementById('githubLoginBtn');
+    if (githubLoginBtn) githubLoginBtn.addEventListener('click', handleGitHubLogin);
 }
 
 async function handleLogin(e) {
@@ -215,6 +217,22 @@ async function handleLogin(e) {
             window.location.href = data.redirect;
         } else {
             showMessage(messageEl, data.error || '登录失败', 'error');
+        }
+    } catch (error) {
+        showMessage(messageEl, '网络错误，请重试', 'error');
+    }
+}
+
+async function handleGitHubLogin(e) {
+    if (e) e.preventDefault();
+    const messageEl = document.getElementById('message');
+    try {
+        const response = await fetch('/auth/login');
+        const data = await response.json();
+        if (response.ok && data.success && data.authUrl) {
+            window.location.href = data.authUrl;
+        } else {
+            showMessage(messageEl, data.error || '获取授权链接失败', 'error');
         }
     } catch (error) {
         showMessage(messageEl, '网络错误，请重试', 'error');
