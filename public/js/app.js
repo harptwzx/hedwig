@@ -92,6 +92,7 @@ async function initApp() {
             return;
         }
         displayUsername();
+        initDashboard();
     }
 }
 
@@ -295,6 +296,120 @@ function displayUsername() {
     }
 }
 
+// ===== Dashboard 功能 =====
+function initDashboard() {
+    loadGameList();
+    initChangePassword();
+}
+
+async function loadGameList() {
+    const gameList = document.getElementById('gameList');
+    if (!gameList) return;
+
+    gameList.innerHTML = '<div class="loading">加载游戏列表...</div>';
+
+    try {
+        // 从当前域名读取 list.txt（与 dashboard.html 同级目录）
+        const response = await fetch('/list.txt');
+        if (!response.ok) {
+            throw new Error('无法加载游戏列表');
+        }
+        const text = await response.text();
+        const games = parseGameList(text);
+
+        if (games.length === 0) {
+            gameList.innerHTML = `
+                <div class="game-empty">
+                    <div class="game-empty-icon">🎮</div>
+                    <p>暂无游戏</p>
+                </div>
+            `;
+            return;
+        }
+
+        // 使用相对路径，与 dashboard.html 相同的打开方式
+        gameList.innerHTML = games.map(game => `
+            <a href="/${game.path}" class="game-item">
+                <span class="game-name">${escapeHtml(game.name)}</span>
+                <span class="game-arrow">→</span>
+            </a>
+        `).join('');
+    } catch (error) {
+        gameList.innerHTML = `
+            <div class="game-empty">
+                <div class="game-empty-icon">⚠️</div>
+                <p>加载游戏列表失败</p>
+                <p style="font-size: 12px; color: #555;">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+function parseGameList(text) {
+    const games = [];
+    const lines = text.split('\n');
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const parts = trimmed.split('|');
+        if (parts.length >= 2) {
+            games.push({
+                name: parts[0].trim(),
+                path: parts[1].trim()
+            });
+        }
+    }
+    return games;
+}
+
+function initChangePassword() {
+    const form = document.getElementById('changePasswordForm');
+    if (!form) return;
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const oldPassword = document.getElementById('oldPassword').value;
+        const newPassword = document.getElementById('newPassword').value;
+        const confirmNewPassword = document.getElementById('confirmNewPassword').value;
+        const messageEl = document.getElementById('passwordMessage');
+
+        if (newPassword !== confirmNewPassword) {
+            showMessage(messageEl, '两次输入的新密码不一致', 'error');
+            return;
+        }
+        if (newPassword.length < 6) {
+            showMessage(messageEl, '新密码长度不能少于6位', 'error');
+            return;
+        }
+
+        const submitBtn = form.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = '修改中...';
+
+        try {
+            const response = await fetch('/api/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ oldPassword, newPassword })
+            });
+            const data = await response.json();
+            if (data.success) {
+                showMessage(messageEl, '密码修改成功！请重新登录', 'success');
+                form.reset();
+                setTimeout(() => logout(), 2000);
+            } else {
+                showMessage(messageEl, data.error || '修改失败', 'error');
+            }
+        } catch (error) {
+            showMessage(messageEl, '网络错误', 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = '修改密码';
+        }
+    });
+}
+
+// ===== 留言板 =====
 let allMessages = [];
 let currentPage = 1;
 let isListExpanded = false;
