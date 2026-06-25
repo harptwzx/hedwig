@@ -1,9 +1,9 @@
 {
   "id": "1782129669532",
   "username": "hedwig",
-  "passwordHash": "ad3362b776574321dc5399ce3ccc9a6e122871cf24875a155df8d36ba3b92f91",
-  "salt": "158e2bb379993de12a1b33ad3f6ad4c7",
-  "tokenVersion": 1,
+  "passwordHash": "fd392c2e3eb06fda7eba8d5baf76a926ce858f5312bf634bcbc35212bcf8713d",
+  "salt": "1260f0c18a4dcecfb39b6dbe89bcd9dd",
+  "tokenVersion": 2,
   "githubId": "209185869",
   "githubLogin": "harptwzx",
   "email": "wzx123_snake@qq.com",
