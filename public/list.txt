@@ -3,5 +3,3 @@
 # 路径相对于 public/ 目录
 
 贪吃蛇|games/snake.html
-俄罗斯方块|games/tetris.html
-2048|games/2048.html
