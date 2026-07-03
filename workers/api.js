@@ -252,6 +252,7 @@ async function serveStaticFile(path) {
             if (path.endsWith('.png')) contentType = 'image/png';
             if (path.endsWith('.jpg') || path.endsWith('.jpeg')) contentType = 'image/jpeg';
             if (path.endsWith('.svg')) contentType = 'image/svg+xml';
+            if (path.endsWith('.txt')) contentType = 'text/plain; charset=utf-8';
             return new Response(content, { headers: { 'Content-Type': contentType } });
         }
     } catch (error) {}
@@ -280,7 +281,7 @@ export default {
                 '/dashboard.html': '/dashboard.html',
                 '/css/style.css': '/css/style.css',
                 '/js/app.js': '/js/app.js',
-                '/list.txt': '/list.txt' 
+                '/list.txt': '/list.txt'
             };
 
             if (staticPaths[path]) {
@@ -288,29 +289,23 @@ export default {
                 if (res) return res;
             }
 
-            if (path === '/auth/register' && request.method === 'POST') {
-                let username, password;
-                try {
-                    const body = await request.json();
-                    username = body.username;
-                    password = body.password;
-                } catch (e) {
-                    username = url.searchParams.get('username');
-                    password = url.searchParams.get('password');
-                }
+            // 处理 games 目录下的静态文件
+            if (path.startsWith('/games/')) {
+                const res = await serveStaticFile(path);
+                if (res) return res;
+            }
+
+            if (path === '/auth/register') {
+                const username = url.searchParams.get('username');
+                const password = url.searchParams.get('password');
                 if (!username || !password) {
-                    return new Response(JSON.stringify({ success: false, error: '用户名和密码不能为空' }), {
-                        status: 400,
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
+                    return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
                 }
                 const stateData = { username, password, type: 'register' };
                 const state = base64Encode(JSON.stringify(stateData));
                 const redirectUri = `${CONFIG.domain}/auth/callback`;
                 const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-                return new Response(JSON.stringify({ success: true, authUrl: authUrl }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
+                return Response.redirect(authUrl, 302);
             }
 
             if (path === '/auth/login') {
@@ -318,9 +313,7 @@ export default {
                 const state = base64Encode(JSON.stringify(stateData));
                 const redirectUri = `${CONFIG.domain}/auth/callback`;
                 const authUrl = `https://github.com/login/oauth/authorize?client_id=${env.GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user,user:email&state=${state}`;
-                return new Response(JSON.stringify({ success: true, authUrl: authUrl }), {
-                    headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                });
+                return Response.redirect(authUrl, 302);
             }
 
             if (path === '/auth/callback') {
@@ -436,13 +429,9 @@ export default {
 
                     await saveSession(env, sessionId, sessionData);
 
-                    return new Response(null, {
-                        status: 302,
-                        headers: {
-                            'Location': `${CONFIG.domain}/dashboard.html`,
-                            'Set-Cookie': setSessionCookie(sessionId)
-                        }
-                    });
+                    const response = Response.redirect(`${CONFIG.domain}/dashboard.html`, 302);
+                    response.headers.set('Set-Cookie', setSessionCookie(sessionId));
+                    return response;
                 }
 
                 return Response.redirect(`${CONFIG.domain}/login.html?error=4`, 302);
