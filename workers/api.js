@@ -279,7 +279,8 @@ export default {
                 '/register.html': '/register.html',
                 '/dashboard.html': '/dashboard.html',
                 '/css/style.css': '/css/style.css',
-                '/js/app.js': '/js/app.js'
+                '/js/app.js': '/js/app.js',
+                '/list.txt': '/list.txt' 
             };
 
             if (staticPaths[path]) {
