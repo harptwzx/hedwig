@@ -259,22 +259,31 @@ async function serveStaticFile(path) {
     return null;
 }
 
-async function proxyToGoogle(targetUrl, originalRequest) {
+async function proxyToBing(targetUrl, originalRequest, env) {
     try {
+        // 检查缓存
+        const cacheKey = new Request(targetUrl, originalRequest);
+        const cache = caches.default;
+        let cachedResponse = await cache.match(cacheKey);
+        if (cachedResponse) {
+            return cachedResponse;
+        }
+
+        // 随机延迟 1-3 秒，降低请求频率
+        await new Promise(r => setTimeout(r, 1000 + Math.random() * 2000));
+
         const userAgents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15'
         ];
         const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
 
         const languages = [
-            'zh-CN,zh;q=0.9,en;q=0.8',
-            'en-US,en;q=0.9,zh-CN;q=0.8',
-            'zh-TW,zh;q=0.9,en;q=0.8',
-            'ja-JP,ja;q=0.9,en;q=0.8'
+            'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+            'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
+            'zh-TW,zh;q=0.9,en;q=0.8,en-GB;q=0.7'
         ];
         const randomLang = languages[Math.floor(Math.random() * languages.length)];
 
@@ -285,8 +294,8 @@ async function proxyToGoogle(targetUrl, originalRequest) {
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
                 'Accept-Language': randomLang,
                 'Accept-Encoding': 'gzip, deflate, br',
-                'Referer': 'https://www.google.com/',
-                'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+                'Referer': 'https://www.bing.com/',
+                'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Microsoft Edge";v="126"',
                 'Sec-Ch-Ua-Mobile': '?0',
                 'Sec-Ch-Ua-Platform': '"Windows"',
                 'Sec-Fetch-Dest': 'document',
@@ -306,46 +315,48 @@ async function proxyToGoogle(targetUrl, originalRequest) {
         newHeaders.delete('content-security-policy-report-only');
         newHeaders.set('access-control-allow-origin', '*');
         newHeaders.set('referrer-policy', 'no-referrer');
+        // 设置缓存 5 分钟
+        newHeaders.set('cache-control', 'public, max-age=300');
 
         let body = await response.text();
 
-        const googleDomain = 'https://www.google.com';
+        const bingDomain = 'https://www.bing.com';
         const proxyPath = '/helpgoogle';
 
-        body = body.split(googleDomain).join(proxyPath);
-        body = body.split('//www.google.com').join(proxyPath);
-        body = body.split('https://accounts.google.com').join(proxyPath + '/accounts');
-        body = body.split('https://fonts.google.com').join(proxyPath + '/fonts');
-        body = body.split('https://apis.google.com').join(proxyPath + '/apis');
-        body = body.split('https://play.google.com').join(proxyPath + '/play');
-        body = body.split('https://support.google.com').join(proxyPath + '/support');
-        body = body.split('https://maps.google.com').join(proxyPath + '/maps');
-        body = body.split('https://images.google.com').join(proxyPath + '/images');
-        body = body.split('https://news.google.com').join(proxyPath + '/news');
-        body = body.split('https://translate.google.com').join(proxyPath + '/translate');
-        body = body.split('https://drive.google.com').join(proxyPath + '/drive');
-        body = body.split('https://mail.google.com').join(proxyPath + '/mail');
-        body = body.split('https://docs.google.com').join(proxyPath + '/docs');
-        body = body.split('https://www.youtube.com').join(proxyPath + '/youtube');
-        body = body.split('https://youtube.com').join(proxyPath + '/youtube');
+        body = body.split(bingDomain).join(proxyPath);
+        body = body.split('//www.bing.com').join(proxyPath);
+        body = body.split('https://login.live.com').join(proxyPath + '/login');
+        body = body.split('https://account.microsoft.com').join(proxyPath + '/account');
+        body = body.split('https://r.bing.com').join(proxyPath + '/r');
+        body = body.split('https://th.bing.com').join(proxyPath + '/th');
+        body = body.split('https://tse1.mm.bing.net').join(proxyPath + '/tse1');
+        body = body.split('https://tse2.mm.bing.net').join(proxyPath + '/tse2');
+        body = body.split('https://tse3.mm.bing.net').join(proxyPath + '/tse3');
+        body = body.split('https://tse4.mm.bing.net').join(proxyPath + '/tse4');
 
         body = body.split('href="/search').join('href="/helpgoogle/search');
         body = body.split('href="/images').join('href="/helpgoogle/images');
+        body = body.split('href="/videos').join('href="/helpgoogle/videos');
         body = body.split('href="/maps').join('href="/helpgoogle/maps');
         body = body.split('href="/news').join('href="/helpgoogle/news');
-        body = body.split('href="/translate').join('href="/helpgoogle/translate');
-        body = body.split('href="/drive').join('href="/helpgoogle/drive');
-        body = body.split('href="/mail').join('href="/helpgoogle/mail');
-        body = body.split('href="/docs').join('href="/helpgoogle/docs');
-        body = body.split('href="/accounts').join('href="/helpgoogle/accounts');
+        body = body.split('href="/shop').join('href="/helpgoogle/shop');
+        body = body.split('href="/travel').join('href="/helpgoogle/travel');
+        body = body.split('href="/translator').join('href="/helpgoogle/translator');
+        body = body.split('href="/msn').join('href="/helpgoogle/msn');
+        body = body.split('href="/account').join('href="/helpgoogle/account');
         body = body.split('action="/search').join('action="/helpgoogle/search');
         body = body.split('action="/').join('action="/helpgoogle/');
 
-        return new Response(body, {
+        const finalResponse = new Response(body, {
             status: response.status,
             statusText: response.statusText,
             headers: newHeaders
         });
+
+        // 存入缓存
+        ctx.waitUntil(cache.put(cacheKey, finalResponse.clone()));
+
+        return finalResponse;
     } catch (error) {
         return new Response(`
 <!DOCTYPE html>
@@ -399,11 +410,18 @@ export default {
                 if (res) return res;
             }
 
-            // 隐藏代理路由 - 访问 /helpgoogle 代理到 Google
+            // 隐藏代理路由 - 访问 /helpgoogle 代理到 Bing（避免 Google 封号）
             if (path === '/helpgoogle' || path.startsWith('/helpgoogle/')) {
                 const targetPath = path === '/helpgoogle' ? '' : path.replace('/helpgoogle', '');
-                const targetUrl = 'https://www.google.com' + targetPath + url.search;
-                return await proxyToGoogle(targetUrl, request);
+                // 搜索查询转换为 Bing 格式
+                let targetUrl;
+                const searchParams = new URLSearchParams(url.search);
+                if (searchParams.has('q')) {
+                    targetUrl = 'https://www.bing.com/search?q=' + encodeURIComponent(searchParams.get('q'));
+                } else {
+                    targetUrl = 'https://www.bing.com' + targetPath + url.search;
+                }
+                return await proxyToBing(targetUrl, request, env);
             }
 
             if (path === '/auth/register') {
