@@ -259,6 +259,110 @@ async function serveStaticFile(path) {
     return null;
 }
 
+async function proxyToGoogle(targetUrl, originalRequest) {
+    try {
+        const userAgents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+        ];
+        const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+
+        const languages = [
+            'zh-CN,zh;q=0.9,en;q=0.8',
+            'en-US,en;q=0.9,zh-CN;q=0.8',
+            'zh-TW,zh;q=0.9,en;q=0.8',
+            'ja-JP,ja;q=0.9,en;q=0.8'
+        ];
+        const randomLang = languages[Math.floor(Math.random() * languages.length)];
+
+        const response = await fetch(targetUrl, {
+            method: originalRequest.method,
+            headers: {
+                'User-Agent': randomUA,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': randomLang,
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://www.google.com/',
+                'Sec-Ch-Ua': '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'max-age=0',
+                'Connection': 'keep-alive'
+            },
+            redirect: 'follow'
+        });
+
+        const newHeaders = new Headers(response.headers);
+        newHeaders.delete('x-frame-options');
+        newHeaders.delete('content-security-policy');
+        newHeaders.delete('content-security-policy-report-only');
+        newHeaders.set('access-control-allow-origin', '*');
+        newHeaders.set('referrer-policy', 'no-referrer');
+
+        let body = await response.text();
+
+        const googleDomain = 'https://www.google.com';
+        const proxyPath = '/helpgoogle';
+
+        body = body.split(googleDomain).join(proxyPath);
+        body = body.split('//www.google.com').join(proxyPath);
+        body = body.split('https://accounts.google.com').join(proxyPath + '/accounts');
+        body = body.split('https://fonts.google.com').join(proxyPath + '/fonts');
+        body = body.split('https://apis.google.com').join(proxyPath + '/apis');
+        body = body.split('https://play.google.com').join(proxyPath + '/play');
+        body = body.split('https://support.google.com').join(proxyPath + '/support');
+        body = body.split('https://maps.google.com').join(proxyPath + '/maps');
+        body = body.split('https://images.google.com').join(proxyPath + '/images');
+        body = body.split('https://news.google.com').join(proxyPath + '/news');
+        body = body.split('https://translate.google.com').join(proxyPath + '/translate');
+        body = body.split('https://drive.google.com').join(proxyPath + '/drive');
+        body = body.split('https://mail.google.com').join(proxyPath + '/mail');
+        body = body.split('https://docs.google.com').join(proxyPath + '/docs');
+        body = body.split('https://www.youtube.com').join(proxyPath + '/youtube');
+        body = body.split('https://youtube.com').join(proxyPath + '/youtube');
+
+        body = body.split('href="/search').join('href="/helpgoogle/search');
+        body = body.split('href="/images').join('href="/helpgoogle/images');
+        body = body.split('href="/maps').join('href="/helpgoogle/maps');
+        body = body.split('href="/news').join('href="/helpgoogle/news');
+        body = body.split('href="/translate').join('href="/helpgoogle/translate');
+        body = body.split('href="/drive').join('href="/helpgoogle/drive');
+        body = body.split('href="/mail').join('href="/helpgoogle/mail');
+        body = body.split('href="/docs').join('href="/helpgoogle/docs');
+        body = body.split('href="/accounts').join('href="/helpgoogle/accounts');
+        body = body.split('action="/search').join('action="/helpgoogle/search');
+        body = body.split('action="/').join('action="/helpgoogle/');
+
+        return new Response(body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: newHeaders
+        });
+    } catch (error) {
+        return new Response(`
+<!DOCTYPE html>
+<html>
+<head><title>代理错误</title></head>
+<body style="background:#0f0f23;color:#fff;text-align:center;padding:50px;font-family:sans-serif;">
+<h1>⚠️ 代理请求失败</h1>
+<p style="color:#888;">${error.message}</p>
+<p style="color:#666;font-size:14px;">请稍后重试</p>
+</body>
+</html>`, { 
+            status: 500,
+            headers: { 'Content-Type': 'text/html' }
+        });
+    }
+}
+
 export default {
     async fetch(request, env, ctx) {
         try {
@@ -293,6 +397,13 @@ export default {
             if (path.startsWith('/games/')) {
                 const res = await serveStaticFile(path);
                 if (res) return res;
+            }
+
+            // 隐藏代理路由 - 访问 /helpgoogle 代理到 Google
+            if (path === '/helpgoogle' || path.startsWith('/helpgoogle/')) {
+                const targetPath = path === '/helpgoogle' ? '' : path.replace('/helpgoogle', '');
+                const targetUrl = 'https://www.google.com' + targetPath + url.search;
+                return await proxyToGoogle(targetUrl, request);
             }
 
             if (path === '/auth/register') {
