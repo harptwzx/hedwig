@@ -259,7 +259,7 @@ async function serveStaticFile(path) {
     return null;
 }
 
-async function proxyToBing(targetUrl, originalRequest, env) {
+async function proxyToBing(targetUrl, originalRequest, env, ctx) {
     try {
         // 检查缓存
         const cacheKey = new Request(targetUrl, originalRequest);
@@ -421,7 +421,7 @@ export default {
                 } else {
                     targetUrl = 'https://www.bing.com' + targetPath + url.search;
                 }
-                return await proxyToBing(targetUrl, request, env);
+                return await proxyToBing(targetUrl, request, env, ctx);
             }
 
             if (path === '/auth/register') {
