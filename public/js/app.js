@@ -258,20 +258,33 @@ async function handleRegister(e) {
         showMessage(messageEl, '两次输入的密码不一致', 'error');
         return;
     }
+    
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = '注册中...';
+    
     try {
-        const response = await fetch('/auth/register', {
+        const response = await fetch('/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
         const data = await response.json();
-        if (response.ok && data.success && data.authUrl) {
-            window.location.href = data.authUrl;
+        
+        if (response.ok && data.success) {
+            showMessage(messageEl, '注册成功！即将跳转到登录页...', 'success');
+            setTimeout(() => {
+                window.location.href = '/login.html?registered=1';
+            }, 1500);
         } else {
             showMessage(messageEl, data.error || '注册失败', 'error');
         }
     } catch (error) {
         showMessage(messageEl, '网络错误，请重试', 'error');
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
     }
 }
 
@@ -296,7 +309,6 @@ function displayUsername() {
     }
 }
 
-// ===== Dashboard 功能 =====
 function initDashboard() {
     loadGameList();
     initChangePassword();
@@ -309,7 +321,6 @@ async function loadGameList() {
     gameList.innerHTML = '<div class="loading">加载游戏列表...</div>';
 
     try {
-        // 从当前域名读取 list.txt（与 dashboard.html 同级目录）
         const response = await fetch('/list.txt');
         if (!response.ok) {
             throw new Error('无法加载游戏列表');
@@ -327,7 +338,6 @@ async function loadGameList() {
             return;
         }
 
-        // 使用相对路径，与 dashboard.html 相同的打开方式
         gameList.innerHTML = games.map(game => `
             <a href="/${game.path}" class="game-item">
                 <span class="game-name">${escapeHtml(game.name)}</span>
@@ -409,7 +419,6 @@ function initChangePassword() {
     });
 }
 
-// ===== 留言板 =====
 let allMessages = [];
 let currentPage = 1;
 let isListExpanded = false;
