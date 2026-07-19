@@ -232,12 +232,13 @@ function getSessionId(request) {
     return match ? match[1] : null;
 }
 
-function setSessionCookie(sessionId) {
-    return `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800; Secure`;
+function setSessionCookie(sessionId, isHttps = true) {
+    const secureFlag = isHttps ? '; Secure' : '';
+    return `session_id=${sessionId}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800${secureFlag}`;
 }
 
 function clearSessionCookie() {
-    return `session_id=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0; Secure`;
+    return `session_id=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`;
 }
 
 async function serveStaticFile(path) {
@@ -273,6 +274,8 @@ export default {
                 return new Response(null, { headers: corsHeaders() });
             }
 
+            const isHttps = url.protocol === 'https:';
+
             const staticPaths = {
                 '/': '/index.html',
                 '/index.html': '/index.html',
@@ -289,15 +292,118 @@ export default {
                 if (res) return res;
             }
 
-            // 处理 games 目录下的静态文件
             if (path.startsWith('/games/')) {
                 const res = await serveStaticFile(path);
                 if (res) return res;
             }
 
+            if (path === '/api/register' && request.method === 'POST') {
+                try {
+                    const body = await request.json();
+                    const { username, password } = body;
+
+                    if (!username || !password) {
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: '用户名和密码不能为空'
+                        }), {
+                            status: 400,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    if (username.length < 3 || username.length > 20) {
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: '用户名长度需在 3-20 个字符之间'
+                        }), {
+                            status: 400,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    if (password.length < 6) {
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: '密码长度不能少于6位'
+                        }), {
+                            status: 400,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const userFilePath = `${CONFIG.dataPath}user_${username}.json`;
+                    const existingUser = await readGitHubFile(userFilePath, env.GITHUB_TOKEN);
+                    if (existingUser) {
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: '用户名已存在'
+                        }), {
+                            status: 409,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    const salt = generateSalt();
+                    const passwordHash = await hashPassword(password, salt);
+
+                    const userData = {
+                        id: Date.now().toString(),
+                        username: username,
+                        passwordHash: passwordHash,
+                        salt: salt,
+                        tokenVersion: 1,
+                        githubId: null,
+                        githubLogin: null,
+                        email: null,
+                        avatar: null,
+                        createdAt: new Date().toISOString()
+                    };
+
+                    const success = await writeGitHubFile(userFilePath, userData, `创建用户: ${username}`, env.GITHUB_TOKEN);
+                    if (!success) {
+                        return new Response(JSON.stringify({
+                            success: false,
+                            error: '保存用户数据失败'
+                        }), {
+                            status: 500,
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    return new Response(JSON.stringify({
+                        success: true,
+                        message: '注册成功'
+                    }), {
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+
+                } catch (error) {
+                    return new Response(JSON.stringify({
+                        success: false,
+                        error: '服务器错误: ' + error.message
+                    }), {
+                        status: 500,
+                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                    });
+                }
+            }
+
             if (path === '/auth/register') {
-                const username = url.searchParams.get('username');
-                const password = url.searchParams.get('password');
+                let username, password;
+                
+                const contentType = request.headers.get('Content-Type') || '';
+                if (contentType.includes('application/json')) {
+                    try {
+                        const body = await request.json();
+                        username = body.username;
+                        password = body.password;
+                    } catch (e) {}
+                } else {
+                    username = url.searchParams.get('username');
+                    password = url.searchParams.get('password');
+                }
+
                 if (!username || !password) {
                     return Response.redirect(`${CONFIG.domain}/register.html?error=1`, 302);
                 }
@@ -430,7 +536,7 @@ export default {
                     await saveSession(env, sessionId, sessionData);
 
                     const response = Response.redirect(`${CONFIG.domain}/dashboard.html`, 302);
-                    response.headers.set('Set-Cookie', setSessionCookie(sessionId));
+                    response.headers.set('Set-Cookie', setSessionCookie(sessionId, isHttps));
                     return response;
                 }
 
@@ -502,7 +608,7 @@ export default {
                     const response = new Response(JSON.stringify(responseData), {
                         headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
                     });
-                    response.headers.set('Set-Cookie', setSessionCookie(sessionId));
+                    response.headers.set('Set-Cookie', setSessionCookie(sessionId, isHttps));
                     return response;
 
                 } catch (error) {
@@ -657,15 +763,11 @@ export default {
 
             if (path === '/api/messages' && request.method === 'POST') {
                 try {
-                    const { name, content } = await request.json();
-                    if (!content || content.trim().length === 0) {
-                        return new Response(JSON.stringify({ success: false, error: '留言内容不能为空' }), {
-                            status: 400,
-                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                        });
-                    }
-                    if (content.length > 500) {
-                        return new Response(JSON.stringify({ success: false, error: '留言内容不能超过500字' }), {
+                    const body = await request.json();
+                    const { name, content } = body;
+
+                    if (!content || !content.trim()) {
+                        return new Response(JSON.stringify({ success: false, error: '内容不能为空' }), {
                             status: 400,
                             headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
                         });
@@ -673,22 +775,22 @@ export default {
 
                     const messageData = {
                         id: generateMessageId(),
-                        name: name ? name.trim().substring(0, 30) : '匿名',
+                        name: name || '匿名',
                         content: content.trim(),
                         timestamp: Date.now()
                     };
 
                     const success = await saveMessage(env, messageData);
-                    if (!success) {
+                    if (success) {
+                        return new Response(JSON.stringify({ success: true, id: messageData.id }), {
+                            headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
+                        });
+                    } else {
                         return new Response(JSON.stringify({ success: false, error: '保存失败' }), {
                             status: 500,
                             headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
                         });
                     }
-
-                    return new Response(JSON.stringify({ success: true, message: messageData }), {
-                        headers: { ...corsHeaders(), 'Content-Type': 'application/json' }
-                    });
                 } catch (error) {
                     return new Response(JSON.stringify({ success: false, error: '服务器错误' }), {
                         status: 500,
@@ -698,12 +800,9 @@ export default {
             }
 
             return new Response('Not Found', { status: 404 });
+
         } catch (error) {
-            return new Response(`Worker Error: ${error.message}
-Stack: ${error.stack}`, {
-                status: 500,
-                headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-            });
+            return new Response(`Internal Server Error: ${error.message}`, { status: 500 });
         }
     }
 };
