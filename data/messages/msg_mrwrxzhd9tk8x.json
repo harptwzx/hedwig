@@ -1,0 +1,8 @@
+{
+  "id": "mrwrxzhd9tk8x",
+  "name": {
+    "$regex": ".*"
+  },
+  "content": "test",
+  "timestamp": 1784766586081
+}
