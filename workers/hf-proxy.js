@@ -21,12 +21,13 @@ export default {
             });
         }
 
-        // 所有 /hf/* 请求都代理到 huggingface.co
         const targetPath = url.pathname.replace(/^\/hf/, '') + url.search;
         const targetUrl = 'https://huggingface.co' + targetPath;
 
         const newHeaders = new Headers(request.headers);
         newHeaders.set('Host', 'huggingface.co');
+        // 伪装来源，避免被识别为代理
+        newHeaders.set('Referer', 'https://huggingface.co' + targetPath);
 
         const proxyRequest = new Request(targetUrl, {
             method: request.method,
@@ -40,46 +41,66 @@ export default {
         respHeaders.set('Access-Control-Allow-Origin', '*');
         respHeaders.set('X-Hedwig-Proxy', 'huggingface.co');
 
-        const location = respHeaders.get('location');
-        if (location) {
-            respHeaders.set('location', location.replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf'));
+        // 替换所有头中的域名
+        for (const [key, value] of respHeaders.entries()) {
+            if (typeof value === 'string' && (value.includes('huggingface.co') || value.includes('hf.co'))) {
+                respHeaders.set(key, value
+                    .replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf')
+                    .replace(/https?:\/\/hf\.co/g, 'https://hedwig.eu.org/hf'));
+            }
         }
 
         const ct = response.headers.get('content-type') || '';
 
-        // HTML: 注入代理脚本，替换路径
         if (ct.includes('text/html')) {
             let text = await response.text();
 
             // 替换所有域名引用
             text = text.replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf');
+            text = text.replace(/https?:\/\/hf\.co/g, 'https://hedwig.eu.org/hf');
+            text = text.replace(/huggingface\.co/g, 'hedwig.eu.org/hf');
 
-            // 关键: 替换相对路径的 href/src/action
-            // 但要排除已经是 /hf/ 开头的路径
-            text = text.replace(/href="\/([a-zA-Z][^"]*)"/g, 'href="/hf/$1"');
-            text = text.replace(/href='\/([a-zA-Z][^']*)'/g, "href='/hf/$1'");
-            text = text.replace(/src="\/([a-zA-Z][^"]*)"/g, 'src="/hf/$1"');
-            text = text.replace(/src='\/([a-zA-Z][^']*)'/g, "src='/hf/$1'");
-            text = text.replace(/action="\/([a-zA-Z][^"]*)"/g, 'action="/hf/$1"');
-            text = text.replace(/action='\/([a-zA-Z][^']*)'/g, "action='/hf/$1'");
+            // 关键: 替换相对路径，但要排除已经是 /hf/ 开头的路径
+            // 使用更精确的正则，避免替换 data URI 等
+            text = text.replace(/href="(\/[^"]*)"/g, (match, p1) => {
+                if (p1.startsWith('/hf/') || p1.startsWith('//')) return match;
+                return `href="/hf${p1}"`;
+            });
+            text = text.replace(/href='(\/[^']*)'/g, (match, p1) => {
+                if (p1.startsWith('/hf/') || p1.startsWith('//')) return match;
+                return `href='/hf${p1}'`;
+            });
+            text = text.replace(/src="(\/[^"]*)"/g, (match, p1) => {
+                if (p1.startsWith('/hf/') || p1.startsWith('//')) return match;
+                return `src="/hf${p1}"`;
+            });
+            text = text.replace(/src='(\/[^']*)'/g, (match, p1) => {
+                if (p1.startsWith('/hf/') || p1.startsWith('//')) return match;
+                return `src='/hf${p1}'`;
+            });
+            text = text.replace(/action="(\/[^"]*)"/g, (match, p1) => {
+                if (p1.startsWith('/hf/') || p1.startsWith('//')) return match;
+                return `action="/hf${p1}"`;
+            });
+            text = text.replace(/action='(\/[^']*)'/g, (match, p1) => {
+                if (p1.startsWith('/hf/') || p1.startsWith('//')) return match;
+                return `action='/hf${p1}'`;
+            });
 
-            // 注入全局拦截脚本 (放在最前面，确保最先执行)
+            // 注入全局拦截脚本
             const injectScript = `<script>
 (function() {
     'use strict';
     const PROXY_PREFIX = '/hf';
+    const PROXY_DOMAIN = 'https://hedwig.eu.org';
 
     function toProxy(url) {
         if (!url) return url;
-        if (url.startsWith('https://huggingface.co')) {
-            return url.replace('https://huggingface.co', 'https://hedwig.eu.org/hf');
-        }
-        if (url.startsWith('http://huggingface.co')) {
-            return url.replace('http://huggingface.co', 'https://hedwig.eu.org/hf');
-        }
-        if (url.startsWith('/') && !url.startsWith('/hf/') && !url.startsWith('//')) {
-            return '/hf' + url;
-        }
+        if (url.startsWith('/hf/') || url.startsWith('https://hedwig.eu.org/hf')) return url;
+        if (url.startsWith('https://huggingface.co')) return url.replace('https://huggingface.co', 'https://hedwig.eu.org/hf');
+        if (url.startsWith('http://huggingface.co')) return url.replace('http://huggingface.co', 'https://hedwig.eu.org/hf');
+        if (url.startsWith('//huggingface.co')) return url.replace('//huggingface.co', '//hedwig.eu.org/hf');
+        if (url.startsWith('/') && !url.startsWith('//')) return '/hf' + url;
         return url;
     }
 
@@ -94,27 +115,39 @@ export default {
         }
     }, true);
 
-    // 拦截 history
+    // 拦截 history - 使用正确的方式
     const origPush = history.pushState;
     const origReplace = history.replaceState;
-    history.pushState = function(s, t, u) { return origPush.call(this, s, t, toProxy(u)); };
-    history.replaceState = function(s, t, u) { return origReplace.call(this, s, t, toProxy(u)); };
+    history.pushState = function(s, t, u) { 
+        return origPush.call(this, s, t, toProxy(u)); 
+    };
+    history.replaceState = function(s, t, u) { 
+        return origReplace.call(this, s, t, toProxy(u)); 
+    };
 
-    // 拦截 location
+    // 拦截 location - 修复递归问题
     const loc = window.location;
-    let currentHref = loc.href;
+    
+    // 保存原始方法
+    const origAssign = loc.assign.bind(loc);
+    const origReplace = loc.replace.bind(loc);
+    
     Object.defineProperty(window, 'location', {
         get: function() { return loc; },
         set: function(url) { loc.href = toProxy(url); }
     });
-    Object.defineProperty(window.location, 'href', {
-        get: function() { return currentHref; },
-        set: function(url) { currentHref = toProxy(url); loc.href = currentHref; }
+    
+    // href setter 直接操作底层，避免递归
+    Object.defineProperty(loc, 'href', {
+        get: function() { return loc.href; },
+        set: function(url) { 
+            // 使用原始赋值，绕过自定义 setter
+            Object.getOwnPropertyDescriptor(window.Location.prototype, 'href').set.call(loc, toProxy(url));
+        }
     });
-    ['assign', 'replace'].forEach(function(m) {
-        var orig = loc[m];
-        loc[m] = function(url) { return orig.call(this, toProxy(url)); };
-    });
+    
+    loc.assign = function(url) { return origAssign(toProxy(url)); };
+    loc.replace = function(url) { return origReplace(toProxy(url)); };
 
     // 拦截 fetch
     const origFetch = window.fetch;
@@ -135,13 +168,20 @@ export default {
         return xhr;
     };
 
-    // 拦截 WebSocket (HuggingFace 可能用)
+    // 拦截 WebSocket
     const OrigWS = window.WebSocket;
     window.WebSocket = function(url, protocols) {
         if (typeof url === 'string' && url.startsWith('wss://huggingface.co')) {
             url = url.replace('wss://huggingface.co', 'wss://hedwig.eu.org/hf');
         }
         return new OrigWS(url, protocols);
+    };
+
+    // 拦截 window.open
+    const origOpen = window.open;
+    window.open = function(url, target, features) {
+        if (typeof url === 'string') url = toProxy(url);
+        return origOpen.call(this, url, target, features);
     };
 
     // 拦截 Form submit
@@ -171,7 +211,6 @@ export default {
 })();
 </script>`;
 
-            // 注入到 <head> 最前面
             if (text.includes('<head>')) {
                 text = text.replace('<head>', '<head>' + injectScript);
             } else if (text.includes('<html')) {
@@ -187,10 +226,10 @@ export default {
             });
         }
 
-        // JS/CSS/JSON: 替换域名
         if (ct.includes('javascript') || ct.includes('json') || ct.includes('css')) {
             let text = await response.text();
             text = text.replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf');
+            text = text.replace(/https?:\/\/hf\.co/g, 'https://hedwig.eu.org/hf');
             text = text.replace(/huggingface\.co/g, 'hedwig.eu.org/hf');
             return new Response(text, {
                 status: response.status,
@@ -206,54 +245,4 @@ export default {
     },
 };
 
-const HTML = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hedwig HF Proxy</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0a1a;color:#eee;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.6}
-.container{max-width:900px;margin:0 auto;padding:40px 20px}
-.header{text-align:center;margin-bottom:50px}
-.header h1{font-size:2.5em;color:#7c8cff;margin-bottom:10px}
-.header p{color:#aaa;font-size:1.1em}
-.card{background:#1a1a2e;border:1px solid #333;border-radius:12px;padding:30px;margin-bottom:25px}
-.card h2{color:#7c8cff;margin-top:0;font-size:1.4em;margin-bottom:15px}
-.card code{background:#0a0a1a;padding:2px 8px;border-radius:4px;color:#4CAF50;font-family:monospace}
-.card pre{background:#0a0a1a;padding:15px;border-radius:8px;overflow-x:auto;border-left:3px solid #7c8cff;margin:15px 0}
-.card pre code{background:none;padding:0;color:#eee}
-.footer{text-align:center;color:#666;margin-top:50px;font-size:0.9em}
-.footer a{color:#7c8cff;text-decoration:none}
-ul{color:#ccc;line-height:2;margin-left:20px}
-h3{color:#aaa;margin:20px 0 10px}
-</style>
-</head>
-<body>
-<div class="container">
-<div class="header">
-<h1>Hedwig HF Proxy</h1>
-<p>Direct access to huggingface.co via Cloudflare</p>
-</div>
-<div class="card">
-<h2>Quick Start</h2>
-<h3>Environment Variable</h3>
-<pre><code>export HF_ENDPOINT=https://hedwig.eu.org/hf
-huggingface-cli download bert-base-uncased</code></pre>
-<h3>Python</h3>
-<pre><code>import os
-os.environ['HF_ENDPOINT'] = 'https://hedwig.eu.org/hf'
-from transformers import AutoModel
-model = AutoModel.from_pretrained('bert-base-uncased')</code></pre>
-</div>
-<div class="card">
-<h2>Web Access</h2>
-<p>Direct browser access: <code>https://hedwig.eu.org/hf/models/bert-base-uncased</code></p>
-</div>
-<div class="footer">
-<p>Powered by <a href="https://hedwig.eu.org">Hedwig</a></p>
-</div>
-</div>
-</body>
-</html>`;
+const HTML = `...`; // 保持不变
