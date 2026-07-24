@@ -1,199 +1,83 @@
-/**
- * Hedwig Hugging Face Accelerator v2
- * Fixed: 308 redirect handling, Location header rewriting
- */
-
-const MIRRORS = [
-    'https://hf-mirror.com',
-    'https://huggingface.modelscope.cn',
-];
-
-function corsHeaders(origin) {
-    return {
-        'Access-Control-Allow-Origin': origin || '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, X-Use-Auth-Token',
-        'Access-Control-Expose-Headers': 'X-Repo-Commit, X-Request-Id, X-Error-Code, X-Error-Message, X-Total-Count, X-Linked-Size',
-        'Access-Control-Allow-Credentials': 'true',
-        'Access-Control-Max-Age': '86400',
-    };
-}
-
-function generateRequestId() {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-}
-
-function cloneHeaders(headers, targetHost) {
-    const newHeaders = new Headers();
-    for (const [key, value] of headers.entries()) {
-        const lowerKey = key.toLowerCase();
-        if (lowerKey === 'host') {
-            newHeaders.set('Host', targetHost);
-            continue;
-        }
-        if (lowerKey === 'referer') {
-            newHeaders.set(key, value.replace(/hedwig\.eu\.org/g, targetHost));
-            continue;
-        }
-        newHeaders.set(key, value);
-    }
-    return newHeaders;
-}
-
-function rewriteLocation(location, proxyHost) {
-    if (!location) return location;
-
-    // 替换各种域名
-    let result = location
-        .replace(/https?:\/\/huggingface\.co/gi, proxyHost)
-        .replace(/https?:\/\/hf-mirror\.com/gi, proxyHost)
-        .replace(/https?:\/\/huggingface\.modelscope\.cn/gi, proxyHost)
-        .replace(/\/\/huggingface\.co/gi, '//hedwig.eu.org/hf')
-        .replace(/\/\/hf-mirror\.com/gi, '//hedwig.eu.org/hf');
-
-    return result;
-}
-
-function rewriteHeaders(headers, proxyHost) {
-    const newHeaders = new Headers();
-    for (const [key, value] of headers.entries()) {
-        let newValue = value;
-        const lowerKey = key.toLowerCase();
-
-        if (lowerKey === 'location') {
-            newValue = rewriteLocation(value, proxyHost);
-        }
-        if (lowerKey === 'set-cookie') {
-            newValue = value.replace(/domain=[^;]+/gi, 'Domain=hedwig.eu.org');
-        }
-        if (lowerKey === 'content-security-policy') {
-            newValue = value
-                .replace(/huggingface\.co/g, 'hedwig.eu.org/hf')
-                .replace(/hf-mirror\.com/g, 'hedwig.eu.org/hf');
-        }
-
-        newHeaders.set(key, newValue);
-    }
-    return newHeaders;
-}
-
-async function rewriteBody(response, proxyHost) {
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.includes('text') && 
-        !contentType.includes('json') && 
-        !contentType.includes('javascript') &&
-        !contentType.includes('xml') &&
-        !contentType.includes('css')) {
-        return response.body;
-    }
-
-    const text = await response.text();
-    return text
-        .replace(/https?:\/\/huggingface\.co/gi, proxyHost)
-        .replace(/huggingface\.co/gi, 'hedwig.eu.org/hf')
-        .replace(/https?:\/\/hf-mirror\.com/gi, proxyHost)
-        .replace(/hf-mirror\.com/gi, 'hedwig.eu.org/hf')
-        .replace(/https?:\/\/huggingface\.modelscope\.cn/gi, proxyHost)
-        .replace(/huggingface\.modelscope\.cn/gi, 'hedwig.eu.org/hf')
-        .replace(/cdn\.huggingface\.co/gi, 'cdn.hf-mirror.com');
-}
-
 export default {
     async fetch(request, env, ctx) {
         const url = new URL(request.url);
-        const requestId = generateRequestId();
 
         // CORS preflight
         if (request.method === 'OPTIONS') {
             return new Response(null, {
                 status: 204,
-                headers: corsHeaders(request.headers.get('origin')),
+                headers: {
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, X-Use-Auth-Token',
+                    'Access-Control-Expose-Headers': 'X-Repo-Commit, X-Request-Id, X-Error-Code, X-Error-Message, X-Total-Count, X-Linked-Size, ETag, Location',
+                    'Access-Control-Max-Age': '86400',
+                },
             });
         }
 
         // Root path: usage guide
         if (url.pathname === '/hf' || url.pathname === '/hf/') {
-            return new Response(HF_PROXY_HTML, {
-                headers: {
-                    'Content-Type': 'text/html; charset=utf-8',
-                    ...corsHeaders(),
-                },
+            return new Response(HTML, {
+                headers: { 'Content-Type': 'text/html; charset=utf-8' },
             });
         }
 
-        // Extract target path (e.g. /hf/models/xxx -> /models/xxx)
-        const targetPath = url.pathname.replace(/^\/hf/, '') || '/';
-        const targetQuery = url.search;
+        // Build target URL
+        const targetPath = url.pathname.replace(/^\/hf/, '') + url.search;
+        const targetUrl = 'https://hf-mirror.com' + targetPath;
 
-        let lastError = null;
-        for (const mirror of MIRRORS) {
-            try {
-                const targetUrl = mirror + targetPath + targetQuery;
-                const targetHost = mirror.replace('https://', '');
+        // Clone headers, fix Host
+        const newHeaders = new Headers(request.headers);
+        newHeaders.set('Host', 'hf-mirror.com');
+        newHeaders.delete('Referer');
 
-                const newHeaders = cloneHeaders(request.headers, targetHost);
+        // Forward request
+        const proxyRequest = new Request(targetUrl, {
+            method: request.method,
+            headers: newHeaders,
+            body: request.body,
+        });
 
-                const proxyRequest = new Request(targetUrl, {
-                    method: request.method,
-                    headers: newHeaders,
-                    body: request.body,
-                    redirect: 'manual',  // 手动处理重定向
-                });
+        const response = await fetch(proxyRequest);
 
-                const response = await fetch(proxyRequest, {
-                    cf: { cacheTtl: 300, cacheEverything: true },
-                });
+        // Build response headers
+        const respHeaders = new Headers(response.headers);
+        respHeaders.set('Access-Control-Allow-Origin', '*');
+        respHeaders.set('X-Hedwig-Proxy', 'hf-mirror.com');
 
-                const rewrittenHeaders = rewriteHeaders(response.headers, 'https://hedwig.eu.org/hf');
-                rewrittenHeaders.set('X-Hedwig-HF-Proxy', 'true');
-                rewrittenHeaders.set('X-Hedwig-Request-Id', requestId);
-                rewrittenHeaders.set('X-Hedwig-Mirror', mirror);
-
-                // Handle redirects (301/302/303/307/308)
-                if ([301, 302, 303, 307, 308].includes(response.status)) {
-                    const location = rewrittenHeaders.get('location') || '';
-                    // 如果 location 是相对路径，补全为代理路径
-                    let finalLocation = location;
-                    if (location.startsWith('/')) {
-                        finalLocation = 'https://hedwig.eu.org/hf' + location;
-                    }
-                    rewrittenHeaders.set('location', finalLocation);
-
-                    return new Response(null, {
-                        status: response.status,
-                        headers: { ...rewrittenHeaders, ...corsHeaders() },
-                    });
-                }
-
-                // Rewrite body
-                const body = await rewriteBody(response, 'https://hedwig.eu.org/hf');
-
-                return new Response(body, {
-                    status: response.status,
-                    statusText: response.statusText,
-                    headers: { ...rewrittenHeaders, ...corsHeaders() },
-                });
-
-            } catch (error) {
-                lastError = error;
-                console.error(`Mirror ${mirror} failed:`, error);
-                continue;
-            }
+        // Rewrite Location if present
+        const location = respHeaders.get('location');
+        if (location) {
+            respHeaders.set('location', location.replace(/https?:\/\/hf-mirror\.com/g, 'https://hedwig.eu.org/hf'));
         }
 
-        return new Response(JSON.stringify({
-            error: 'All mirrors unavailable',
-            requestId,
-            mirrors: MIRRORS,
-            lastError: lastError ? lastError.message : null,
-        }), {
-            status: 502,
-            headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+        // Rewrite body for text content
+        const ct = response.headers.get('content-type') || '';
+        if (ct.includes('text') || ct.includes('json') || ct.includes('javascript') || ct.includes('css')) {
+            const text = await response.text();
+            const body = text
+                .replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf')
+                .replace(/https?:\/\/hf-mirror\.com/g, 'https://hedwig.eu.org/hf')
+                .replace(/huggingface\.co/g, 'hedwig.eu.org/hf')
+                .replace(/hf-mirror\.com/g, 'hedwig.eu.org/hf');
+            return new Response(body, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: respHeaders,
+            });
+        }
+
+        // Binary content: stream directly
+        return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: respHeaders,
         });
     },
 };
 
-const HF_PROXY_HTML = `<!DOCTYPE html>
+const HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -213,9 +97,6 @@ body{background:#0a0a1a;color:#eee;font-family:-apple-system,BlinkMacSystemFont,
 .card pre code{background:none;padding:0;color:#eee}
 .tip{background:rgba(124,140,255,0.1);border-left:3px solid #7c8cff;padding:15px 20px;border-radius:0 8px 8px 0;margin:15px 0;color:#ccc}
 .tip strong{color:#7c8cff}
-.mirror-status{display:flex;gap:15px;flex-wrap:wrap;margin-top:15px}
-.mirror-item{background:#0a0a1a;padding:10px 20px;border-radius:8px;display:flex;align-items:center;gap:8px;color:#ccc}
-.status-dot{width:8px;height:8px;border-radius:50%;background:#4CAF50}
 .footer{text-align:center;color:#666;margin-top:50px;font-size:0.9em}
 .footer a{color:#7c8cff;text-decoration:none}
 ul{color:#ccc;line-height:2;margin-left:20px}
@@ -225,76 +106,26 @@ h3{color:#aaa;margin:20px 0 10px}
 <body>
 <div class="container">
 <div class="header">
-<div style="font-size:64px;margin-bottom:15px">🤗</div>
-<h1>Hedwig Hugging Face Accelerator</h1>
-<p>Fast and stable Hugging Face access for China users</p>
+<h1>Hedwig HF Accelerator</h1>
+<p>Fast Hugging Face access via hf-mirror.com</p>
 </div>
-
 <div class="card">
-<h2>📖 How It Works</h2>
-<p>This proxy forwards all <code>huggingface.co</code> requests to domestic mirrors.</p>
-<div class="tip">
-<strong>Core:</strong> Replace <code>huggingface.co</code> with <code>hedwig.eu.org/hf</code> to accelerate all Hugging Face resources.
-</div>
-</div>
-
-<div class="card">
-<h2>⚡ Quick Start</h2>
-<h3>Method 1: Environment Variable (Recommended)</h3>
-<pre><code># Linux / macOS
-export HF_ENDPOINT=https://hedwig.eu.org/hf
-
-# Windows PowerShell
-$env:HF_ENDPOINT = "https://hedwig.eu.org/hf"
-
-# Then use huggingface-cli normally
+<h2>Quick Start</h2>
+<h3>Environment Variable</h3>
+<pre><code>export HF_ENDPOINT=https://hedwig.eu.org/hf
 huggingface-cli download bert-base-uncased</code></pre>
-
-<h3>Method 2: Python Code</h3>
+<h3>Python</h3>
 <pre><code>import os
 os.environ['HF_ENDPOINT'] = 'https://hedwig.eu.org/hf'
-
 from transformers import AutoModel
 model = AutoModel.from_pretrained('bert-base-uncased')</code></pre>
-
-<h3>Method 3: Direct Web Access</h3>
-<p>Visit directly: <code>https://hedwig.eu.org/hf/models/bert-base-uncased</code></p>
 </div>
-
 <div class="card">
-<h2>🌐 Mirror Status</h2>
-<div class="mirror-status">
-<div class="mirror-item"><span class="status-dot"></span><span>hf-mirror.com (Primary)</span></div>
-<div class="mirror-item"><span class="status-dot"></span><span>huggingface.modelscope.cn (Backup)</span></div>
+<h2>Web Access</h2>
+<p>Direct browser access: <code>https://hedwig.eu.org/hf/models/bert-base-uncased</code></p>
 </div>
-<p style="color:#888;margin-top:15px;font-size:0.9em">Auto-selects optimal mirror. Falls back automatically.</p>
-</div>
-
-<div class="card">
-<h2>📦 Supported Resources</h2>
-<ul>
-<li>🤖 <strong>Models</strong> - All public model repos</li>
-<li>📊 <strong>Datasets</strong> - All public datasets</li>
-<li>🚀 <strong>Spaces</strong> - Hugging Face Spaces</li>
-<li>📄 <strong>Model Cards & Docs</strong> - Full web interface</li>
-<li>📥 <strong>File Downloads</strong> - LFS large files</li>
-<li>🔍 <strong>Search & API</strong> - Hub API calls</li>
-</ul>
-</div>
-
-<div class="card">
-<h2>⚠️ Notes</h2>
-<ul>
-<li>Only proxies public resources. <strong>Gated models requiring login are not supported.</strong></li>
-<li>For large files, use <code>huggingface-cli</code> or <code>hf_transfer</code></li>
-<li>Mirror sync may have delays</li>
-<li>Please use responsibly</li>
-</ul>
-</div>
-
 <div class="footer">
-<p>Powered by <a href="https://hedwig.eu.org">Hedwig</a> | Accelerated by Cloudflare Workers</p>
-<p style="font-size:0.8em;margin-top:10px">For educational and research purposes only</p>
+<p>Powered by <a href="https://hedwig.eu.org">Hedwig</a></p>
 </div>
 </div>
 </body>
