@@ -38,7 +38,7 @@ export default {
 
         const respHeaders = new Headers(response.headers);
         respHeaders.set('Access-Control-Allow-Origin', '*');
-        respHeaders.set('X-Hedwig-Proxy', 'huggingface.co');
+        respHeaders.set('X-Hedwig-Proxy', 'google.com');
 
         const location = respHeaders.get('location');
         if (location) {
