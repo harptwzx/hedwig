@@ -22,7 +22,7 @@ export default {
         }
 
         const targetPath = url.pathname.replace(/^\/hf/, '') + url.search;
-        const targetUrl = 'https://huggingface.co' + targetPath;
+        const targetUrl = 'https://google.com' + targetPath;
 
         const newHeaders = new Headers(request.headers);
         newHeaders.set('Host', 'huggingface.co');
