@@ -1,8 +1,6 @@
 /**
- * Hedwig Hugging Face Accelerator (Hidden Feature)
- * 
- * Routes: /hf/* -> Proxy to hf-mirror.com
- * Usage: Replace huggingface.co with hedwig.eu.org/hf
+ * Hedwig Hugging Face Accelerator v2
+ * Fixed: 308 redirect handling, Location header rewriting
  */
 
 const MIRRORS = [
@@ -14,7 +12,8 @@ function corsHeaders(origin) {
     return {
         'Access-Control-Allow-Origin': origin || '*',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS, HEAD, PATCH',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cache-Control, X-Use-Auth-Token',
+        'Access-Control-Expose-Headers': 'X-Repo-Commit, X-Request-Id, X-Error-Code, X-Error-Message, X-Total-Count, X-Linked-Size',
         'Access-Control-Allow-Credentials': 'true',
         'Access-Control-Max-Age': '86400',
     };
@@ -28,7 +27,10 @@ function cloneHeaders(headers, targetHost) {
     const newHeaders = new Headers();
     for (const [key, value] of headers.entries()) {
         const lowerKey = key.toLowerCase();
-        if (lowerKey === 'host') continue;
+        if (lowerKey === 'host') {
+            newHeaders.set('Host', targetHost);
+            continue;
+        }
         if (lowerKey === 'referer') {
             newHeaders.set(key, value.replace(/hedwig\.eu\.org/g, targetHost));
             continue;
@@ -38,16 +40,28 @@ function cloneHeaders(headers, targetHost) {
     return newHeaders;
 }
 
+function rewriteLocation(location, proxyHost) {
+    if (!location) return location;
+
+    // 替换各种域名
+    let result = location
+        .replace(/https?:\/\/huggingface\.co/gi, proxyHost)
+        .replace(/https?:\/\/hf-mirror\.com/gi, proxyHost)
+        .replace(/https?:\/\/huggingface\.modelscope\.cn/gi, proxyHost)
+        .replace(/\/\/huggingface\.co/gi, '//hedwig.eu.org/hf')
+        .replace(/\/\/hf-mirror\.com/gi, '//hedwig.eu.org/hf');
+
+    return result;
+}
+
 function rewriteHeaders(headers, proxyHost) {
     const newHeaders = new Headers();
     for (const [key, value] of headers.entries()) {
         let newValue = value;
         const lowerKey = key.toLowerCase();
+
         if (lowerKey === 'location') {
-            newValue = value
-                .replace(/https?:\/\/huggingface\.co/gi, proxyHost)
-                .replace(/https?:\/\/hf-mirror\.com/gi, proxyHost)
-                .replace(/https?:\/\/huggingface\.modelscope\.cn/gi, proxyHost);
+            newValue = rewriteLocation(value, proxyHost);
         }
         if (lowerKey === 'set-cookie') {
             newValue = value.replace(/domain=[^;]+/gi, 'Domain=hedwig.eu.org');
@@ -57,6 +71,7 @@ function rewriteHeaders(headers, proxyHost) {
                 .replace(/huggingface\.co/g, 'hedwig.eu.org/hf')
                 .replace(/hf-mirror\.com/g, 'hedwig.eu.org/hf');
         }
+
         newHeaders.set(key, newValue);
     }
     return newHeaders;
@@ -88,6 +103,7 @@ export default {
         const url = new URL(request.url);
         const requestId = generateRequestId();
 
+        // CORS preflight
         if (request.method === 'OPTIONS') {
             return new Response(null, {
                 status: 204,
@@ -95,7 +111,7 @@ export default {
             });
         }
 
-        // Root path shows usage guide
+        // Root path: usage guide
         if (url.pathname === '/hf' || url.pathname === '/hf/') {
             return new Response(HF_PROXY_HTML, {
                 headers: {
@@ -105,6 +121,7 @@ export default {
             });
         }
 
+        // Extract target path (e.g. /hf/models/xxx -> /models/xxx)
         const targetPath = url.pathname.replace(/^\/hf/, '') || '/';
         const targetQuery = url.search;
 
@@ -112,14 +129,15 @@ export default {
         for (const mirror of MIRRORS) {
             try {
                 const targetUrl = mirror + targetPath + targetQuery;
-                const newHeaders = cloneHeaders(request.headers, mirror.replace('https://', ''));
-                newHeaders.set('Host', mirror.replace('https://', ''));
+                const targetHost = mirror.replace('https://', '');
+
+                const newHeaders = cloneHeaders(request.headers, targetHost);
 
                 const proxyRequest = new Request(targetUrl, {
                     method: request.method,
                     headers: newHeaders,
                     body: request.body,
-                    redirect: 'manual',
+                    redirect: 'manual',  // 手动处理重定向
                 });
 
                 const response = await fetch(proxyRequest, {
@@ -131,13 +149,23 @@ export default {
                 rewrittenHeaders.set('X-Hedwig-Request-Id', requestId);
                 rewrittenHeaders.set('X-Hedwig-Mirror', mirror);
 
+                // Handle redirects (301/302/303/307/308)
                 if ([301, 302, 303, 307, 308].includes(response.status)) {
+                    const location = rewrittenHeaders.get('location') || '';
+                    // 如果 location 是相对路径，补全为代理路径
+                    let finalLocation = location;
+                    if (location.startsWith('/')) {
+                        finalLocation = 'https://hedwig.eu.org/hf' + location;
+                    }
+                    rewrittenHeaders.set('location', finalLocation);
+
                     return new Response(null, {
                         status: response.status,
                         headers: { ...rewrittenHeaders, ...corsHeaders() },
                     });
                 }
 
+                // Rewrite body
                 const body = await rewriteBody(response, 'https://hedwig.eu.org/hf');
 
                 return new Response(body, {
@@ -220,13 +248,13 @@ export HF_ENDPOINT=https://hedwig.eu.org/hf
 $env:HF_ENDPOINT = "https://hedwig.eu.org/hf"
 
 # Then use huggingface-cli normally
-huggingface-cli download meta-llama/Llama-3-8B</code></pre>
+huggingface-cli download bert-base-uncased</code></pre>
 
 <h3>Method 2: Python Code</h3>
 <pre><code>import os
 os.environ['HF_ENDPOINT'] = 'https://hedwig.eu.org/hf'
 
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel
 model = AutoModel.from_pretrained('bert-base-uncased')</code></pre>
 
 <h3>Method 3: Direct Web Access</h3>
