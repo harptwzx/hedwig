@@ -22,7 +22,7 @@ export default {
         }
 
         const targetPath = url.pathname.replace(/^\/hf/, '') + url.search;
-        const targetUrl = 'https://google.com' + targetPath;
+        const targetUrl = 'https://huggingface.co' + targetPath;
 
         const newHeaders = new Headers(request.headers);
         newHeaders.set('Host', 'huggingface.co');
@@ -38,7 +38,7 @@ export default {
 
         const respHeaders = new Headers(response.headers);
         respHeaders.set('Access-Control-Allow-Origin', '*');
-        respHeaders.set('X-Hedwig-Proxy', 'google.com');
+        respHeaders.set('X-Hedwig-Proxy', 'huggingface.co');
 
         const location = respHeaders.get('location');
         if (location) {
