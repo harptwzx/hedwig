@@ -47,11 +47,38 @@ export default {
 
         const ct = response.headers.get('content-type') || '';
         if (ct.includes('text') || ct.includes('json') || ct.includes('javascript') || ct.includes('css')) {
-            const text = await response.text();
-            const body = text
+            let text = await response.text();
+
+            // 删除 Turnstile 验证码相关脚本
+            text = text.replace(/<script[^>]*src="[^"]*turnstile[^"]*"[^>]*><\/script>/gi, '');
+            text = text.replace(/<script[^>]*>[^<]*turnstile[^<]*<\/script>/gi, '');
+            text = text.replace(/<script[^>]*>[^<]*challenge[^<]*<\/script>/gi, '');
+            text = text.replace(/<script[^>]*>[^<]*cf-turnstile[^<]*<\/script>/gi, '');
+
+            // 删除 Turnstile 表单和 div
+            text = text.replace(/<div[^>]*class="[^"]*cf-turnstile[^"]*"[^>]*>.*?<\/div>/gis, '');
+            text = text.replace(/<div[^>]*class="[^"]*turnstile[^"]*"[^>]*>.*?<\/div>/gis, '');
+            text = text.replace(/<form[^>]*action="[^"]*challenge[^"]*"[^>]*>.*?<\/form>/gis, '');
+            text = text.replace(/<form[^>]*id="[^"]*challenge[^"]*"[^>]*>.*?<\/form>/gis, '');
+
+            // 删除自动提交表单的 JavaScript
+            text = text.replace(/<script[^>]*>[^<]*document\.forms\[0\]\.submit\(\)[^<]*<\/script>/gi, '');
+            text = text.replace(/<script[^>]*>[^<]*\.submit\(\)[^<]*<\/script>/gi, '');
+            text = text.replace(/<script[^>]*>[^<]*autoSubmit[^<]*<\/script>/gi, '');
+
+            // 禁用 challenge 相关的 fetch/xhr
+            text = text.replace(/fetch\(['"`][^'"`]*challenge[^'"`]*['"`]\)/gi, 'Promise.resolve()');
+            text = text.replace(/new XMLHttpRequest\(\)[^;]*challenge[^;]*;/gi, '');
+
+            // 删除包含 challenge-platform 的脚本
+            text = text.replace(/<script[^>]*src="[^"]*challenge-platform[^"]*"[^>]*><\/script>/gi, '');
+
+            // 替换域名
+            text = text
                 .replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf')
                 .replace(/huggingface\.co/g, 'hedwig.eu.org/hf');
-            return new Response(body, {
+
+            return new Response(text, {
                 status: response.status,
                 statusText: response.statusText,
                 headers: respHeaders,
