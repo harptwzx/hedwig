@@ -21,12 +21,25 @@ export default {
             });
         }
 
-        const targetPath = url.pathname.replace(/^\/hf/, '') + url.search;
+        // 判断是否是 HuggingFace 代理请求
+        // 支持两种路径: /hf/xxx 和 /xxx (通过 Referer 判断)
+        let targetPath;
+        const referer = request.headers.get('referer') || '';
+
+        if (url.pathname.startsWith('/hf/')) {
+            targetPath = url.pathname.replace(/^\/hf/, '') + url.search;
+        } else if (referer.includes('/hf/')) {
+            // 从 HF 页面发起的请求，路径也应该代理
+            targetPath = url.pathname + url.search;
+        } else {
+            // 不是 HF 相关请求，返回 404
+            return new Response('Not Found', { status: 404 });
+        }
+
         const targetUrl = 'https://huggingface.co' + targetPath;
 
         const newHeaders = new Headers(request.headers);
         newHeaders.set('Host', 'huggingface.co');
-        newHeaders.delete('Referer');
 
         const proxyRequest = new Request(targetUrl, {
             method: request.method,
@@ -46,26 +59,96 @@ export default {
         }
 
         const ct = response.headers.get('content-type') || '';
-        if (ct.includes('text') || ct.includes('json') || ct.includes('javascript') || ct.includes('css')) {
+        if (ct.includes('text/html')) {
             let text = await response.text();
 
-            // 核心修复：把页面里的相对路径都加上 /hf 前缀
-            // href="/xxx" -> href="/hf/xxx"
-            text = text.replace(/href="\/([^"]*?)"/g, 'href="/hf/$1"');
-            text = text.replace(/href='\/([^']*?)'/g, "href='/hf/$1'");
+            // 注入 <base> 标签，让所有相对路径以 /hf 为基准
+            const baseTag = '<base href="https://hedwig.eu.org/hf/">';
+            if (text.includes('<head>')) {
+                text = text.replace('<head>', '<head>' + baseTag);
+            } else if (text.includes('<html')) {
+                text = text.replace('<html', baseTag + '<html');
+            }
 
-            // src="/xxx" -> src="/hf/xxx"
-            text = text.replace(/src="\/([^"]*?)"/g, 'src="/hf/$1"');
-            text = text.replace(/src='\/([^']*?)'/g, "src='/hf/$1'");
+            // 注入路由拦截脚本
+            const routeScript = `<script>
+(function() {
+    // 拦截所有导航到 huggingface.co 的链接
+    document.addEventListener('click', function(e) {
+        const el = e.target.closest('a');
+        if (el && el.href) {
+            const url = new URL(el.href);
+            if (url.hostname === 'huggingface.co' || url.hostname === 'hf-mirror.com') {
+                e.preventDefault();
+                window.location.href = 'https://hedwig.eu.org/hf' + url.pathname + url.search;
+            } else if (url.hostname === location.hostname && !url.pathname.startsWith('/hf/')) {
+                e.preventDefault();
+                window.location.href = 'https://hedwig.eu.org/hf' + url.pathname + url.search;
+            }
+        }
+    });
 
-            // action="/xxx" -> action="/hf/xxx" (表单提交)
-            text = text.replace(/action="\/([^"]*?)"/g, 'action="/hf/$1"');
-            text = text.replace(/action='\/([^']*?)'/g, "action='/hf/$1'");
+    // 拦截 history.pushState / replaceState
+    const originalPush = history.pushState;
+    const originalReplace = history.replaceState;
 
-            // url(/xxx) -> url(/hf/xxx) (CSS)
-            text = text.replace(/url\("?\/([^")]*?)"?\)/g, 'url(/hf/$1)');
+    history.pushState = function(state, title, url) {
+        if (url && url.startsWith('/')) url = '/hf' + url;
+        return originalPush.call(this, state, title, url);
+    };
 
-            // 替换绝对域名
+    history.replaceState = function(state, title, url) {
+        if (url && url.startsWith('/')) url = '/hf' + url;
+        return originalReplace.call(this, state, title, url);
+    };
+
+    // 拦截 location.href 赋值
+    let currentHref = location.href;
+    Object.defineProperty(window.location, 'href', {
+        get: function() { return currentHref; },
+        set: function(url) {
+            if (url.startsWith('/')) url = '/hf' + url;
+            currentHref = url;
+            window.location.assign(url);
+        }
+    });
+
+    // 拦截 fetch API，重写 huggingface.co 的请求
+    const originalFetch = window.fetch;
+    window.fetch = function(url, options) {
+        if (typeof url === 'string') {
+            if (url.startsWith('https://huggingface.co')) {
+                url = url.replace('https://huggingface.co', 'https://hedwig.eu.org/hf');
+            } else if (url.startsWith('/')) {
+                url = '/hf' + url;
+            }
+        }
+        return originalFetch.call(this, url, options);
+    };
+
+    // 拦截 XMLHttpRequest
+    const OriginalXHR = window.XMLHttpRequest;
+    window.XMLHttpRequest = function() {
+        const xhr = new OriginalXHR();
+        const originalOpen = xhr.open;
+        xhr.open = function(method, url, async, user, password) {
+            if (typeof url === 'string') {
+                if (url.startsWith('https://huggingface.co')) {
+                    url = url.replace('https://huggingface.co', 'https://hedwig.eu.org/hf');
+                } else if (url.startsWith('/')) {
+                    url = '/hf' + url;
+                }
+            }
+            return originalOpen.call(this, method, url, async, user, password);
+        };
+        return xhr;
+    };
+})();
+</script>`;
+
+            text = text.replace('</head>', routeScript + '</head>');
+
+            // 替换域名引用
             text = text
                 .replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf')
                 .replace(/huggingface\.co/g, 'hedwig.eu.org/hf');
@@ -73,6 +156,31 @@ export default {
             return new Response(text, {
                 status: response.status,
                 statusText: response.statusText,
+                headers: respHeaders,
+            });
+        }
+
+        if (ct.includes('javascript')) {
+            let text = await response.text();
+            // JS 里的路径也需要处理
+            text = text
+                .replace(/"\/([^"]*?)"/g, '"/hf/$1"')
+                .replace(/'\/([^']*?)'/g, "'/hf/$1'")
+                .replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf')
+                .replace(/huggingface\.co/g, 'hedwig.eu.org/hf');
+            return new Response(text, {
+                status: response.status,
+                headers: respHeaders,
+            });
+        }
+
+        if (ct.includes('json') || ct.includes('css')) {
+            let text = await response.text();
+            text = text
+                .replace(/https?:\/\/huggingface\.co/g, 'https://hedwig.eu.org/hf')
+                .replace(/huggingface\.co/g, 'hedwig.eu.org/hf');
+            return new Response(text, {
+                status: response.status,
                 headers: respHeaders,
             });
         }
