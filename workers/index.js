@@ -10,7 +10,7 @@ export default {
         }
         
         //文件传输路由
-        if (url.pathname.startsWith('/share/*')) {
+        if (url.pathname.startsWith('/share')) {
             const hfProxy = await import('./file-share.js');
             return hfProxy.default.fetch(request, env, ctx);
         }
