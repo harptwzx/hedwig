@@ -1,6 +1,6 @@
 import api from './api.js';
 import hfProxy from './hf-proxy.js';
-import fileShare from './file-share.js';
+import fileShare from './share.js';
 
 export default {
     async fetch(request, env, ctx) {
