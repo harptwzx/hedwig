@@ -17,6 +17,11 @@ class GitHubStorage {
     };
   }
 
+  // ========== FIX: 路径编码 ==========
+  encodePath(path) {
+    return path.split('/').map(encodeURIComponent).join('/');
+  }
+
   async request(path, options) {
     const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
     const resp = await fetch(url, {
@@ -26,24 +31,19 @@ class GitHubStorage {
     return resp;
   }
 
-  // ========== FIX: getFile 增强版 ==========
-  // 支持通过 download_url 获取大文件（GitHub Content API 对 >1MB 文件不返回 content）
   async getFile(path) {
     try {
-      const resp = await this.request(`/contents/${path}`);
+      const encodedPath = this.encodePath(path);
+      const resp = await this.request(`/contents/${encodedPath}`);
       if (resp.status === 404) return { ok: false, status: 404, data: null };
       if (!resp.ok) {
         const text = await resp.text();
         return { ok: false, status: resp.status, error: text, data: null };
       }
       const data = await resp.json();
-
-      // 如果是目录而非文件
       if (Array.isArray(data)) {
         return { ok: false, status: 400, error: 'path is directory', data: null };
       }
-
-      // 小文件：直接读取 content
       if (data.content) {
         const cleanContent = data.content.replace(/\s/g, '');
         try {
@@ -52,8 +52,6 @@ class GitHubStorage {
           return { ok: true, status: 200, data: atob(cleanContent), raw: data };
         }
       }
-
-      // 大文件：通过 download_url 获取
       if (data.download_url) {
         const dlResp = await fetch(data.download_url, {
           headers: { 'User-Agent': 'Hedwig-FileShare/1.0' }
@@ -68,53 +66,74 @@ class GitHubStorage {
           return { ok: true, status: 200, data: text, raw: data };
         }
       }
-
       return { ok: false, status: 500, error: 'no content or download_url', data: null };
     } catch (e) {
       return { ok: false, status: 500, error: e.message, data: null };
     }
   }
 
-  // ========== FIX: putFile 严格检查返回值 ==========
+  // ========== FIX: putFile 422 自动重试 ==========
   async putFile(path, content, message) {
     const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
     const base64Content = btoa(contentStr);
-    let sha = null;
-    try {
-      const resp = await this.request(`/contents/${path}`);
-      if (resp.status === 200) {
-        const data = await resp.json();
-        sha = data.sha;
+    const encodedPath = this.encodePath(path);
+
+    async function doPut(sha) {
+      const body = {
+        message: message || `Update ${path}`,
+        content: base64Content,
+        ...(sha ? { sha } : {}),
+      };
+      const resp = await this.request(`/contents/${encodedPath}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => 'unknown');
+        return { ok: false, status: resp.status, error: text };
       }
-    } catch {}
-    const body = {
-      message: message || `Update ${path}`,
-      content: base64Content,
-      ...(sha ? { sha } : {}),
-    };
-    const resp = await this.request(`/contents/${path}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => 'unknown');
-      return { ok: false, status: resp.status, error: text };
+      return { ok: true, status: resp.status };
     }
-    return { ok: true, status: resp.status };
+
+    // 先尝试不带 sha（创建新文件）
+    let result = await doPut.call(this, null);
+
+    // 如果 422 且提示缺少 sha，说明文件已存在，重新获取 sha 后重试
+    if (!result.ok && result.status === 422) {
+      const errorText = (result.error || '').toLowerCase();
+      if (errorText.includes('sha') || errorText.includes('wasn\'t supplied')) {
+        // 等待 GitHub 同步，然后重新获取 sha
+        await new Promise(r => setTimeout(r, 2000));
+        let sha = null;
+        try {
+          const checkResp = await this.request(`/contents/${encodedPath}`);
+          if (checkResp.status === 200) {
+            const checkData = await checkResp.json();
+            sha = checkData.sha;
+          }
+        } catch (e) {}
+        if (sha) {
+          result = await doPut.call(this, sha);
+        }
+      }
+    }
+
+    return result;
   }
 
   async deleteFile(path, message) {
+    const encodedPath = this.encodePath(path);
     let sha = null;
     try {
-      const resp = await this.request(`/contents/${path}`);
+      const resp = await this.request(`/contents/${encodedPath}`);
       if (resp.status === 200) {
         const data = await resp.json();
         sha = data.sha;
       }
     } catch {}
     if (!sha) return { ok: true };
-    const resp = await this.request(`/contents/${path}`, {
+    const resp = await this.request(`/contents/${encodedPath}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -127,7 +146,8 @@ class GitHubStorage {
 
   async listDir(path) {
     try {
-      const resp = await this.request(`/contents/${path}`);
+      const encodedPath = this.encodePath(path);
+      const resp = await this.request(`/contents/${encodedPath}`);
       if (resp.status === 404) return [];
       if (!resp.ok) return [];
       const data = await resp.json();
@@ -229,7 +249,6 @@ async function cleanupExpired(gh) {
   }
 }
 
-// ========== FIX: 指数退避重试工具 ==========
 async function retryWithBackoff(fn, maxRetries = 5, baseDelay = 2000) {
   for (let i = 0; i < maxRetries; i++) {
     const result = await fn();
@@ -280,7 +299,6 @@ export default {
       return handleAdmin(gh, user, superUser);
     }
 
-    // ========== FIX: 调试端点 ==========
     if (path.startsWith('/share/debug/') && request.method === 'GET') {
       const fileId = path.replace('/share/debug/', '');
       return handleDebug(fileId, gh);
@@ -379,7 +397,6 @@ async function handleUpload(request, gh, user, superUser) {
       chunks: [],
     };
 
-    // ========== FIX: 严格检查文件写入 ==========
     if (fileSize > CONFIG.CHUNK_SIZE && superUser) {
       const numChunks = Math.ceil(fileSize / CONFIG.CHUNK_SIZE);
       for (let i = 0; i < numChunks; i++) {
@@ -390,7 +407,6 @@ async function handleUpload(request, gh, user, superUser) {
         const chunkBase64 = arrayBufferToBase64(chunk.buffer);
         const putResult = await gh.putFile(chunkPath, chunkBase64, `Upload chunk ${i} of ${fileId}`);
         if (!putResult.ok) {
-          // 回滚已上传的分块
           for (let j = 0; j < i; j++) {
             await gh.deleteFile(`data/file_data/${fileId}_chunk_${j}`, 'Rollback');
           }
@@ -414,7 +430,6 @@ async function handleUpload(request, gh, user, superUser) {
 
     const metaResult = await gh.putFile(`data/files/${fileId}.json`, metadata, `Create metadata for ${fileId}`);
     if (!metaResult.ok) {
-      // 回滚文件数据
       if (metadata.chunks) {
         for (const chunk of metadata.chunks) {
           await gh.deleteFile(`data/file_data/${chunk.path}`, 'Rollback metadata fail');
@@ -445,7 +460,6 @@ async function handleUpload(request, gh, user, superUser) {
 
 async function handleDownload(fileId, gh) {
   try {
-    // ========== FIX: 多次指数退避重试 ==========
     const metaResult = await retryWithBackoff(async () => {
       const r = await gh.getFile(`data/files/${fileId}.json`);
       return r.ok && r.data ? r : null;
@@ -568,7 +582,6 @@ async function handleDelete(fileId, gh, user) {
   }
 }
 
-// ========== FIX: 调试端点 ==========
 async function handleDebug(fileId, gh) {
   const metaResult = await gh.getFile(`data/files/${fileId}.json`);
   const fileResult = metaResult.ok && metaResult.data 
