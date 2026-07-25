@@ -1,5 +1,5 @@
 name = "hedwig"
-main = "workers/share.js"
+main = "workers/index2.js"
 compatibility_date = "2024-06-14"
 
 [observability]
