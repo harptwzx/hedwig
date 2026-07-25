@@ -1,31 +1,23 @@
-/**
- * Hedwig File Share - 临时文件分享系统
- * 存储: GitHub 仓库
- */
-
 const CONFIG = {
-    MAX_NORMAL_SIZE: 100 * 1024 * 1024,  // 100MB
-    CHUNK_SIZE: 50 * 1024 * 1024,         // 50MB
-    DEFAULT_EXPIRY: 10 * 60 * 1000,        // 10分钟
-    MAX_TOTAL_SIZE: 500 * 1024 * 1024,    // 500MB
+    MAX_NORMAL_SIZE: 100 * 1024 * 1024,
+    CHUNK_SIZE: 50 * 1024 * 1024,
+    DEFAULT_EXPIRY: 10 * 60 * 1000,
+    MAX_TOTAL_SIZE: 500 * 1024 * 1024,
     SUPER_USERS: ['hedwig', 'harptwzx'],
 };
 
-// GitHub API 工具
 class GitHubStorage {
-    constructor(token, owner, repo) {
+    constructor(token) {
         this.token = token;
-        this.owner = owner;
-        this.repo = repo;
-        this.baseUrl = `https://api.github.com/repos/${owner}/${repo}`;
+        this.baseUrl = 'https://api.github.com/repos/harptwzx/hedwig';
         this.headers = {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `token ${token}`,
             'Accept': 'application/vnd.github.v3+json',
             'User-Agent': 'Hedwig-FileShare/1.0',
         };
     }
 
-    async request(path, options = {}) {
+    async request(path, options) {
         const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
         const resp = await fetch(url, {
             ...options,
@@ -56,7 +48,6 @@ class GitHubStorage {
     async putFile(path, content, message) {
         const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
         const base64Content = btoa(contentStr);
-
         let sha = null;
         try {
             const resp = await this.request(`/contents/${path}`);
@@ -65,13 +56,11 @@ class GitHubStorage {
                 sha = data.sha;
             }
         } catch {}
-
         const body = {
             message: message || `Update ${path}`,
             content: base64Content,
             ...(sha ? { sha } : {}),
         };
-
         const resp = await this.request(`/contents/${path}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -89,9 +78,7 @@ class GitHubStorage {
                 sha = data.sha;
             }
         } catch {}
-
         if (!sha) return true;
-
         const resp = await this.request(`/contents/${path}`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
@@ -125,15 +112,13 @@ function generateHash() {
 
 function isSuperUser(user) {
     if (!user) return false;
-    return CONFIG.SUPER_USERS.includes(user.username) || 
-           CONFIG.SUPER_USERS.includes(user.githubLogin);
+    return CONFIG.SUPER_USERS.includes(user.username) || CONFIG.SUPER_USERS.includes(user.githubLogin);
 }
 
 async function getCurrentUser(request) {
     const cookie = request.headers.get('Cookie') || '';
     const match = cookie.match(/hedwig_session=([^;]+)/);
     if (!match) return null;
-
     try {
         const sessionData = JSON.parse(atob(decodeURIComponent(match[1])));
         return sessionData.user || null;
@@ -195,12 +180,7 @@ export default {
             });
         }
 
-        const gh = new GitHubStorage(
-            env.GITHUB_TOKEN,
-            env.GITHUB_OWNER || 'harptwzx',
-            env.GITHUB_REPO || 'hedwig'
-        );
-
+        const gh = new GitHubStorage(env.GITHUB_TOKEN);
         const user = await getCurrentUser(request);
         const superUser = isSuperUser(user);
 
@@ -243,7 +223,6 @@ export default {
 async function handleUpload(request, gh, user, superUser) {
     try {
         const contentType = request.headers.get('Content-Type') || '';
-
         if (!contentType.includes('multipart/form-data')) {
             return jsonResponse({ error: '请使用 multipart/form-data 上传' }, 400);
         }
@@ -263,7 +242,7 @@ async function handleUpload(request, gh, user, superUser) {
 
         if (!superUser) {
             if (fileSize > CONFIG.MAX_NORMAL_SIZE) {
-                return jsonResponse({ error: `文件过大，普通用户限制 ${formatSize(CONFIG.MAX_NORMAL_SIZE)}` }, 413);
+                return jsonResponse({ error: '文件过大，普通用户限制 ' + formatSize(CONFIG.MAX_NORMAL_SIZE) }, 413);
             }
         }
 
@@ -292,7 +271,6 @@ async function handleUpload(request, gh, user, superUser) {
 
         const arrayBuffer = await file.arrayBuffer();
         const uint8Array = new Uint8Array(arrayBuffer);
-
         const expiresAt = Date.now() + (superUser ? expiryMinutes * 60 * 1000 : CONFIG.DEFAULT_EXPIRY);
 
         const metadata = {
@@ -313,12 +291,9 @@ async function handleUpload(request, gh, user, superUser) {
                 const start = i * CONFIG.CHUNK_SIZE;
                 const end = Math.min(start + CONFIG.CHUNK_SIZE, fileSize);
                 const chunk = uint8Array.slice(start, end);
-
                 const chunkPath = `data/file_data/${fileId}_chunk_${i}`;
                 const chunkBase64 = arrayBufferToBase64(chunk.buffer);
-
                 await gh.putFile(chunkPath, chunkBase64, `Upload chunk ${i} of ${fileId}`);
-
                 metadata.chunks.push({
                     index: i,
                     path: `${fileId}_chunk_${i}`,
@@ -342,13 +317,12 @@ async function handleUpload(request, gh, user, superUser) {
             size: fileSize,
             sizeFormatted: formatSize(fileSize),
             expiresAt: expiresAt,
-            expiresIn: superUser ? `${expiryMinutes}分钟` : '10分钟',
+            expiresIn: superUser ? expiryMinutes + '分钟' : '10分钟',
             isChunked: metadata.chunks.length > 0,
             chunks: metadata.chunks.length,
         });
 
     } catch (error) {
-        console.error('Upload error:', error);
         return jsonResponse({ error: '上传失败: ' + error.message }, 500);
     }
 }
@@ -356,7 +330,6 @@ async function handleUpload(request, gh, user, superUser) {
 async function handleDownload(fileId, gh) {
     try {
         const metadata = await gh.getFile(`data/files/${fileId}.json`);
-
         if (!metadata) {
             return new Response('文件不存在或已过期', { status: 404 });
         }
@@ -374,7 +347,6 @@ async function handleDownload(fileId, gh) {
         }
 
         let fileData;
-
         if (metadata.chunks && metadata.chunks.length > 0) {
             const chunks = [];
             for (const chunkInfo of metadata.chunks) {
@@ -383,7 +355,6 @@ async function handleDownload(fileId, gh) {
                     chunks.push(base64ToArrayBuffer(chunkData));
                 }
             }
-
             const totalSize = chunks.reduce((sum, c) => sum + c.byteLength, 0);
             const merged = new Uint8Array(totalSize);
             let offset = 0;
@@ -411,7 +382,6 @@ async function handleDownload(fileId, gh) {
         });
 
     } catch (error) {
-        console.error('Download error:', error);
         return new Response('下载失败: ' + error.message, { status: 500 });
     }
 }
@@ -419,15 +389,12 @@ async function handleDownload(fileId, gh) {
 async function handleDelete(fileId, gh, user) {
     try {
         const metadata = await gh.getFile(`data/files/${fileId}.json`);
-
         if (!metadata) {
             return jsonResponse({ error: '文件不存在' }, 404);
         }
-
         if (!user || (metadata.uploadedBy !== user.username && !isSuperUser(user))) {
             return jsonResponse({ error: '无权删除此文件' }, 403);
         }
-
         if (metadata.chunks) {
             for (const chunk of metadata.chunks) {
                 await gh.deleteFile(`data/file_data/${chunk.path}`, 'User delete');
@@ -435,11 +402,8 @@ async function handleDelete(fileId, gh, user) {
         } else if (metadata.path) {
             await gh.deleteFile(`data/file_data/${metadata.path}`, 'User delete');
         }
-
         await gh.deleteFile(`data/files/${fileId}.json`, 'User delete');
-
         return jsonResponse({ success: true, message: '文件已删除' });
-
     } catch (error) {
         return jsonResponse({ error: '删除失败: ' + error.message }, 500);
     }
@@ -449,12 +413,10 @@ async function handleAdmin(gh, user, superUser) {
     if (!superUser) {
         return new Response('无权访问', { status: 403 });
     }
-
     try {
         const files = await gh.listDir('data/files');
         const fileList = [];
         let totalSize = 0;
-
         for (const f of files) {
             if (f.type === 'file' && f.name.endsWith('.json')) {
                 const meta = await gh.getFile(`data/files/${f.name}`);
@@ -474,25 +436,24 @@ async function handleAdmin(gh, user, superUser) {
             }
         }
 
-        const html = ADMIN_HTML
-            .replace('{{fileCount}}', String(fileList.length))
-            .replace('{{totalSize}}', formatSize(totalSize))
-            .replace('{{maxSize}}', formatSize(CONFIG.MAX_TOTAL_SIZE))
-            .replace('{{usagePercent}}', String(Math.round((totalSize / CONFIG.MAX_TOTAL_SIZE) * 100)))
-            .replace('"{{fileList}}"', JSON.stringify(fileList));
+        let html = ADMIN_HTML;
+        html = html.replace(/\{\{fileCount\}\}/g, String(fileList.length));
+        html = html.replace(/\{\{totalSize\}\}/g, formatSize(totalSize));
+        html = html.replace(/\{\{maxSize\}\}/g, formatSize(CONFIG.MAX_TOTAL_SIZE));
+        html = html.replace(/\{\{usagePercent\}\}/g, String(Math.round((totalSize / CONFIG.MAX_TOTAL_SIZE) * 100)));
+        html = html.replace('"{{fileList}}"', JSON.stringify(fileList));
 
         return new Response(html, {
             headers: { 'Content-Type': 'text/html; charset=utf-8' },
         });
-
     } catch (error) {
         return new Response('加载失败: ' + error.message, { status: 500 });
     }
 }
 
-function jsonResponse(data, status = 200) {
+function jsonResponse(data, status) {
     return new Response(JSON.stringify(data), {
-        status,
+        status: status || 200,
         headers: {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*',
@@ -579,14 +540,12 @@ input[type="file"]{display:none}
 <h1>Hedwig 文件分享</h1>
 <p>临时文件存储，快速分享</p>
 </div>
-
 <div class="upload-area" id="uploadArea">
 <div class="upload-icon">📁</div>
 <div class="upload-text">点击或拖拽文件到此处上传</div>
 <div class="upload-hint">普通用户: 最大 100MB，保存 10 分钟</div>
 </div>
 <input type="file" id="fileInput">
-
 <div class="options" id="options">
 <div class="option-row">
 <label>文件名</label>
@@ -614,12 +573,10 @@ input[type="file"]{display:none}
 </div>
 <button class="upload-btn" id="uploadBtn">上传文件</button>
 </div>
-
 <div class="progress" id="progress">
 <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
 <div class="progress-text" id="progressText">准备上传...</div>
 </div>
-
 <div class="result" id="result">
 <h3 style="color:#7c8cff;margin-bottom:10px">上传成功！</h3>
 <p style="color:#aaa">分享链接:</p>
@@ -627,12 +584,10 @@ input[type="file"]{display:none}
 <button class="copy-btn" onclick="copyUrl()">复制链接</button>
 <div class="file-info" id="fileInfo"></div>
 </div>
-
 <div class="footer">
 <p>Powered by <a href="https://hedwig.eu.org">Hedwig</a> | 存储于 GitHub</p>
 </div>
 </div>
-
 <script>
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
@@ -640,10 +595,8 @@ const options = document.getElementById('options');
 const uploadBtn = document.getElementById('uploadBtn');
 const progress = document.getElementById('progress');
 const result = document.getElementById('result');
-
 let selectedFile = null;
 let isSuperUser = false;
-
 function checkSuperUser() {
     const cookie = document.cookie;
     isSuperUser = cookie.includes('hedwig_session');
@@ -654,36 +607,29 @@ function checkSuperUser() {
     }
 }
 checkSuperUser();
-
 uploadArea.addEventListener('click', () => fileInput.click());
-
 uploadArea.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadArea.classList.add('dragover');
 });
-
 uploadArea.addEventListener('dragleave', () => {
     uploadArea.classList.remove('dragover');
 });
-
 uploadArea.addEventListener('drop', (e) => {
     e.preventDefault();
     uploadArea.classList.remove('dragover');
     const files = e.dataTransfer.files;
     if (files.length > 0) handleFile(files[0]);
 });
-
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) handleFile(e.target.files[0]);
 });
-
 function handleFile(file) {
     selectedFile = file;
     document.getElementById('fileName').value = file.name;
     document.getElementById('fileSize').value = formatSize(file.size);
     options.classList.add('show');
 }
-
 function formatSize(bytes) {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -691,37 +637,28 @@ function formatSize(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
-
 uploadBtn.addEventListener('click', async () => {
     if (!selectedFile) return;
-
     uploadBtn.disabled = true;
     progress.classList.add('show');
     result.classList.remove('show');
-
     const formData = new FormData();
     formData.append('file', selectedFile);
-
     if (isSuperUser) {
         const customUrl = document.getElementById('customUrl').value.trim();
         const expiry = document.getElementById('expiryMinutes').value;
         if (customUrl) formData.append('customUrl', customUrl);
         formData.append('expiryMinutes', expiry);
     }
-
     try {
         document.getElementById('progressText').textContent = '正在上传...';
         document.getElementById('progressFill').style.width = '50%';
-
         const resp = await fetch('/share/upload', {
             method: 'POST',
             body: formData,
         });
-
         document.getElementById('progressFill').style.width = '100%';
-
         const data = await resp.json();
-
         if (data.success) {
             document.getElementById('resultUrl').textContent = data.url;
             document.getElementById('fileInfo').innerHTML = 
@@ -738,7 +675,6 @@ uploadBtn.addEventListener('click', async () => {
         setTimeout(() => progress.classList.remove('show'), 1000);
     }
 });
-
 function copyUrl() {
     const url = document.getElementById('resultUrl').textContent;
     navigator.clipboard.writeText(url).then(() => {
@@ -790,9 +726,7 @@ body{background:#0a0a1a;color:#eee;font-family:-apple-system,BlinkMacSystemFont,
 <h1>文件管理</h1>
 <p>超级用户控制台</p>
 </div>
-
 <a href="/share" class="back-btn">返回上传页面</a>
-
 <div class="stats">
 <div class="stat-card">
 <div class="stat-value">{{fileCount}}</div>
@@ -812,7 +746,6 @@ body{background:#0a0a1a;color:#eee;font-family:-apple-system,BlinkMacSystemFont,
 <div class="usage-bar"><div class="usage-fill" style="width:{{usagePercent}}%"></div></div>
 </div>
 </div>
-
 <div class="file-list">
 <div class="file-list-header">
 <div>文件名</div>
@@ -825,11 +758,9 @@ body{background:#0a0a1a;color:#eee;font-family:-apple-system,BlinkMacSystemFont,
 <div id="fileList"></div>
 </div>
 </div>
-
 <script>
 const files = {{fileList}};
 const listEl = document.getElementById('fileList');
-
 files.forEach(file => {
     const div = document.createElement('div');
     div.className = 'file-item';
@@ -841,7 +772,6 @@ files.forEach(file => {
         '<div class="file-actions"><button onclick="deleteFile(\'' + file.id + '\')">删除</button></div>';
     listEl.appendChild(div);
 });
-
 async function deleteFile(id) {
     if (!confirm('确定删除此文件？')) return;
     try {
