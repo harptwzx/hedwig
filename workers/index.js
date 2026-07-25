@@ -4,7 +4,7 @@ export default {
         const url = new URL(request.url);
              
         // 原有网站路由
-        const api = await import('./file-share.js');
+        const api = await import('./share.js');
         return api.default.fetch(request, env, ctx);
     },
 };
