@@ -9,12 +9,6 @@ export default {
             return hfProxy.default.fetch(request, env, ctx);
         }
         
-        //文件传输路由
-        if (url.pathname.startsWith('/share')) {
-            const hfProxy = await import('./file-share.js');
-            return hfProxy.default.fetch(request, env, ctx);
-        }
-        
         // 原有网站路由
         const api = await import('./api.js');
         return api.default.fetch(request, env, ctx);
