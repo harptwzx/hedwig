@@ -1,14 +1,16 @@
 const CONFIG = {
-  MAX_NORMAL_SIZE: 700 * 1024,        // 700KB - GitHub Content API 单文件限制
-  CHUNK_SIZE: 700 * 1024,             // 700KB 分块，避免 422 content too large
+  MAX_NORMAL_SIZE: 100 * 1024 * 1024,
+  CHUNK_SIZE: 50 * 1024 * 1024,
   DEFAULT_EXPIRY: 10 * 60 * 1000,
   MAX_TOTAL_SIZE: 500 * 1024 * 1024,
   SUPER_USERS: ['hedwig', 'harptwzx'],
+  RAW_BASE: 'https://raw.githubusercontent.com/harptwzx/hedwig/main',
 };
 
 class GitHubStorage {
-  constructor(token) {
+  constructor(token, env) {
     this.token = token;
+    this.env = env;
     this.baseUrl = 'https://api.github.com/repos/harptwzx/hedwig';
     this.headers = {
       'Authorization': `token ${token}`,
@@ -17,33 +19,50 @@ class GitHubStorage {
     };
   }
 
-  async request(path, options) {
-    const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
-    const resp = await fetch(url, {
-      ...options,
-      headers: { ...this.headers, ...options.headers },
-    });
-    return resp;
+  // ========== 读取走 Raw CDN，零延迟 ==========
+  async readRaw(path) {
+    try {
+      // Raw 路径不需要 encodeURIComponent，直接用原始路径
+      const url = `${CONFIG.RAW_BASE}/${path}?t=${Date.now()}`;
+      const resp = await fetch(url, {
+        headers: { 'User-Agent': 'Hedwig-FileShare/1.0' },
+        cf: { cacheTtl: 0 },
+      });
+      if (resp.status === 404) return { ok: false, status: 404, data: null };
+      if (!resp.ok) {
+        const text = await resp.text();
+        return { ok: false, status: resp.status, error: text, data: null };
+      }
+      const text = await resp.text();
+      try {
+        return { ok: true, status: 200, data: JSON.parse(text) };
+      } catch {
+        return { ok: true, status: 200, data: text };
+      }
+    } catch (e) {
+      return { ok: false, status: 500, error: e.message, data: null };
+    }
   }
 
-  // ========== FIX: getFile 增强版 ==========
-  // 支持通过 download_url 获取大文件（GitHub Content API 对 >1MB 文件不返回 content）
+  // 保留 API 读取作为 fallback（目录列表必须用 API）
   async getFile(path) {
+    // 优先走 Raw CDN
+    const raw = await this.readRaw(path);
+    if (raw.ok) return raw;
+    // Raw 失败时 fallback 到 API
     try {
-      const resp = await this.request(`/contents/${path}`);
+      const resp = await fetch(`${this.baseUrl}/contents/${path}`, {
+        headers: this.headers,
+      });
       if (resp.status === 404) return { ok: false, status: 404, data: null };
       if (!resp.ok) {
         const text = await resp.text();
         return { ok: false, status: resp.status, error: text, data: null };
       }
       const data = await resp.json();
-
-      // 如果是目录而非文件
       if (Array.isArray(data)) {
         return { ok: false, status: 400, error: 'path is directory', data: null };
       }
-
-      // 小文件：直接读取 content
       if (data.content) {
         const cleanContent = data.content.replace(/\s/g, '');
         try {
@@ -52,8 +71,6 @@ class GitHubStorage {
           return { ok: true, status: 200, data: atob(cleanContent), raw: data };
         }
       }
-
-      // 大文件：通过 download_url 获取
       if (data.download_url) {
         const dlResp = await fetch(data.download_url, {
           headers: { 'User-Agent': 'Hedwig-FileShare/1.0' }
@@ -68,71 +85,57 @@ class GitHubStorage {
           return { ok: true, status: 200, data: text, raw: data };
         }
       }
-
       return { ok: false, status: 500, error: 'no content or download_url', data: null };
     } catch (e) {
       return { ok: false, status: 500, error: e.message, data: null };
     }
   }
 
-  // ========== FIX: putFile 严格检查返回值 ==========
-  async putFile(path, content, message, maxRetries = 3) {
+  async putFile(path, content, message) {
     const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
     const base64Content = btoa(contentStr);
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      let sha = null;
-      try {
-        const resp = await this.request(`/contents/${path}`);
-        if (resp.ok) {
-          const data = await resp.json();
-          sha = data.sha;
-        }
-      } catch {}
-
-      const body = {
-        message: message || `Update ${path}`,
-        content: base64Content,
-        ...(sha ? { sha } : {}),
-      };
-
-      const resp = await this.request(`/contents/${path}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+    let sha = null;
+    try {
+      const resp = await fetch(`${this.baseUrl}/contents/${path}`, {
+        headers: this.headers,
       });
-
-      if (resp.ok) {
-        return { ok: true, status: resp.status };
+      if (resp.status === 200) {
+        const data = await resp.json();
+        sha = data.sha;
       }
-
+    } catch {}
+    const body = {
+      message: message || `Update ${path}`,
+      content: base64Content,
+      ...(sha ? { sha } : {}),
+    };
+    const resp = await fetch(`${this.baseUrl}/contents/${path}`, {
+      method: 'PUT',
+      headers: { ...this.headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
       const text = await resp.text().catch(() => 'unknown');
-
-      // 422 sha 错误：GitHub 缓存不一致，等待后重试
-      if (resp.status === 422 && text.includes('sha') && attempt < maxRetries - 1) {
-        await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
-        continue;
-      }
-
       return { ok: false, status: resp.status, error: text };
     }
-
-    return { ok: false, status: 422, error: 'Max retries exceeded for sha conflict' };
+    return { ok: true, status: resp.status };
   }
 
   async deleteFile(path, message) {
     let sha = null;
     try {
-      const resp = await this.request(`/contents/${path}`);
+      const resp = await fetch(`${this.baseUrl}/contents/${path}`, {
+        headers: this.headers,
+      });
       if (resp.status === 200) {
         const data = await resp.json();
         sha = data.sha;
       }
     } catch {}
     if (!sha) return { ok: true };
-    const resp = await this.request(`/contents/${path}`, {
+    const resp = await fetch(`${this.baseUrl}/contents/${path}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...this.headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: message || `Delete ${path}`,
         sha,
@@ -143,7 +146,9 @@ class GitHubStorage {
 
   async listDir(path) {
     try {
-      const resp = await this.request(`/contents/${path}`);
+      const resp = await fetch(`${this.baseUrl}/contents/${path}`, {
+        headers: this.headers,
+      });
       if (resp.status === 404) return [];
       if (!resp.ok) return [];
       const data = await resp.json();
@@ -154,54 +159,26 @@ class GitHubStorage {
   }
 }
 
-async function generateContentHash(arrayBuffer) {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function generateRandomSuffix(length = 4) {
+function generateHash() {
   const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
-  for (let i = 0; i < length; i++) {
+  for (let i = 0; i < 8; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return result;
 }
 
-function generateHash() {
-  return generateRandomSuffix(8);
-}
-
-async function getCurrentUser(request, gh) {
+// ========== 保持原有参数不变 ==========
+async function getCurrentUser(request) {
   const cookie = request.headers.get('Cookie') || '';
-  const sessionMatch = cookie.match(/session_id=([^;]+)/);
-  if (sessionMatch) {
-    const sessionId = sessionMatch[1];
-    try {
-      const sessionData = await gh.getFile(`data/sessions/${sessionId}.json`);
-      if (sessionData.ok && sessionData.data && sessionData.data.expires > Date.now()) {
-        const userData = await gh.getFile(`data/users/user_${sessionData.data.username}.json`);
-        if (userData.ok && userData.data) {
-          return {
-            username: userData.data.username,
-            githubLogin: userData.data.githubLogin,
-          };
-        }
-        return { username: sessionData.data.username };
-      }
-    } catch (e) {}
+  const match = cookie.match(/hedwig_session=([^;]+)/);
+  if (!match) return null;
+  try {
+    const sessionData = JSON.parse(atob(decodeURIComponent(match[1])));
+    return sessionData.user || null;
+  } catch {
+    return null;
   }
-  const hedwigMatch = cookie.match(/hedwig_session=([^;]+)/);
-  if (hedwigMatch) {
-    try {
-      const sessionData = JSON.parse(atob(decodeURIComponent(hedwigMatch[1])));
-      return sessionData.user || null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
 }
 
 function isSuperUser(user) {
@@ -215,7 +192,7 @@ async function getTotalSize(gh) {
   for (const f of files) {
     if (f.type === 'file' && f.name.endsWith('.json')) {
       try {
-        const meta = await gh.getFile(`data/files/${f.name}`);
+        const meta = await gh.readRaw(`data/files/${f.name}`);
         if (meta.ok && meta.data && meta.data.size) total += meta.data.size;
       } catch {}
     }
@@ -229,7 +206,7 @@ async function cleanupExpired(gh) {
   for (const f of files) {
     if (f.type === 'file' && f.name.endsWith('.json')) {
       try {
-        const meta = await gh.getFile(`data/files/${f.name}`);
+        const meta = await gh.readRaw(`data/files/${f.name}`);
         if (meta.ok && meta.data && meta.data.expiresAt && meta.data.expiresAt < now) {
           if (meta.data.chunks) {
             for (const chunk of meta.data.chunks) {
@@ -243,19 +220,6 @@ async function cleanupExpired(gh) {
       } catch {}
     }
   }
-}
-
-// ========== FIX: 指数退避重试工具 ==========
-async function retryWithBackoff(fn, maxRetries = 5, baseDelay = 2000) {
-  for (let i = 0; i < maxRetries; i++) {
-    const result = await fn();
-    if (result) return result;
-    if (i < maxRetries - 1) {
-      const delay = baseDelay * Math.pow(2, i);
-      await new Promise(r => setTimeout(r, delay));
-    }
-  }
-  return null;
 }
 
 export default {
@@ -275,8 +239,8 @@ export default {
       });
     }
 
-    const gh = new GitHubStorage(env.GITHUB_TOKEN);
-    const user = await getCurrentUser(request, gh);
+    const gh = new GitHubStorage(env.GITHUB_TOKEN, env);
+    const user = await getCurrentUser(request);
     const superUser = isSuperUser(user);
 
     if (path === '/share' || path === '/share/') {
@@ -292,29 +256,24 @@ export default {
       return handleUpload(request, gh, user, superUser);
     }
 
-    if (path === '/share/admin' && request.method === 'GET') {
-      return handleAdmin(gh, user, superUser);
-    }
-
-    // ========== FIX: 调试端点 ==========
-    if (path.startsWith('/share/debug/') && request.method === 'GET') {
-      const fileId = path.replace('/share/debug/', '').replace(/\/$/, '');
-      return handleDebug(fileId, gh);
-    }
-
-    if (path.startsWith('/share/')) {
-      const fileId = path.replace('/share/', '').replace(/\/$/, '');
+    if (path.startsWith('/share/') && request.method === 'GET') {
+      const fileId = path.replace('/share/', '');
       if (!fileId) {
         return new Response(SHARE_HTML, {
           headers: { 'Content-Type': 'text/html; charset=utf-8' },
         });
       }
-      if (request.method === 'GET') {
-        return handleDownload(fileId, gh);
-      }
-      if (request.method === 'DELETE') {
-        return handleDelete(fileId, gh, user);
-      }
+      // ========== 保持原有参数：handleDownload(fileId, gh) ==========
+      return handleDownload(fileId, gh);
+    }
+
+    if (path.startsWith('/share/') && request.method === 'DELETE') {
+      const fileId = path.replace('/share/', '');
+      return handleDelete(fileId, gh, user);
+    }
+
+    if (path === '/share/admin') {
+      return handleAdmin(gh, user, superUser);
     }
 
     return new Response('Not Found', { status: 404 });
@@ -356,34 +315,25 @@ async function handleUpload(request, gh, user, superUser) {
       }
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-    const expiresAt = Date.now() + (superUser ? expiryMinutes * 60 * 1000 : CONFIG.DEFAULT_EXPIRY);
-
     let fileId;
     if (superUser && customUrl.trim()) {
-      const cleanUrl = customUrl.trim();
-      if (!/^[a-zA-Z0-9_-]+$/.test(cleanUrl)) {
-        return jsonResponse({ error: '自定义网址只能包含字母、数字、下划线和连字符' }, 400);
-      }
-      const existing = await gh.getFile(`data/files/${cleanUrl}.json`);
+      const existing = await gh.readRaw(`data/files/${customUrl.trim()}.json`);
       if (existing.ok && existing.data) {
         return jsonResponse({ error: '该自定义网址已被使用' }, 409);
       }
-      fileId = cleanUrl;
+      fileId = customUrl.trim();
     } else {
-      const contentHash = (await generateContentHash(arrayBuffer)).slice(0, 10);
-      fileId = contentHash;
-      let collisionCheck = await gh.getFile(`data/files/${fileId}.json`);
-      let dataCollision = await gh.getFile(`data/file_data/${fileId}`);
-      let safety = 0;
-      while ((collisionCheck.ok && collisionCheck.data) || (dataCollision.ok && dataCollision.data) && safety < 20) {
-        fileId = contentHash + generateRandomSuffix(4);
-        collisionCheck = await gh.getFile(`data/files/${fileId}.json`);
-        dataCollision = await gh.getFile(`data/file_data/${fileId}`);
-        safety++;
+      fileId = generateHash();
+      let collisionCheck = await gh.readRaw(`data/files/${fileId}.json`);
+      while (collisionCheck.ok && collisionCheck.data) {
+        fileId = generateHash();
+        collisionCheck = await gh.readRaw(`data/files/${fileId}.json`);
       }
     }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+    const expiresAt = Date.now() + (superUser ? expiryMinutes * 60 * 1000 : CONFIG.DEFAULT_EXPIRY);
 
     const metadata = {
       id: fileId,
@@ -397,7 +347,6 @@ async function handleUpload(request, gh, user, superUser) {
       chunks: [],
     };
 
-    // ========== FIX: 严格检查文件写入 ==========
     if (fileSize > CONFIG.CHUNK_SIZE && superUser) {
       const numChunks = Math.ceil(fileSize / CONFIG.CHUNK_SIZE);
       for (let i = 0; i < numChunks; i++) {
@@ -406,14 +355,7 @@ async function handleUpload(request, gh, user, superUser) {
         const chunk = uint8Array.slice(start, end);
         const chunkPath = `data/file_data/${fileId}_chunk_${i}`;
         const chunkBase64 = arrayBufferToBase64(chunk.buffer);
-        const putResult = await gh.putFile(chunkPath, chunkBase64, `Upload chunk ${i} of ${fileId}`);
-        if (!putResult.ok) {
-          // 回滚已上传的分块
-          for (let j = 0; j < i; j++) {
-            await gh.deleteFile(`data/file_data/${fileId}_chunk_${j}`, 'Rollback');
-          }
-          return jsonResponse({ error: `分块 ${i} 上传失败: ${putResult.status} ${putResult.error || ''}` }, 500);
-        }
+        await gh.putFile(chunkPath, chunkBase64, `Upload chunk ${i} of ${fileId}`);
         metadata.chunks.push({
           index: i,
           path: `${fileId}_chunk_${i}`,
@@ -423,25 +365,11 @@ async function handleUpload(request, gh, user, superUser) {
     } else {
       const filePath = `data/file_data/${fileId}`;
       const base64Content = arrayBufferToBase64(arrayBuffer);
-      const putResult = await gh.putFile(filePath, base64Content, `Upload file ${fileId}`);
-      if (!putResult.ok) {
-        return jsonResponse({ error: `文件数据上传失败: ${putResult.status} ${putResult.error || ''}` }, 500);
-      }
+      await gh.putFile(filePath, base64Content, `Upload file ${fileId}`);
       metadata.path = fileId;
     }
 
-    const metaResult = await gh.putFile(`data/files/${fileId}.json`, metadata, `Create metadata for ${fileId}`);
-    if (!metaResult.ok) {
-      // 回滚文件数据
-      if (metadata.chunks) {
-        for (const chunk of metadata.chunks) {
-          await gh.deleteFile(`data/file_data/${chunk.path}`, 'Rollback metadata fail');
-        }
-      } else if (metadata.path) {
-        await gh.deleteFile(`data/file_data/${metadata.path}`, 'Rollback metadata fail');
-      }
-      return jsonResponse({ error: `元数据写入失败: ${metaResult.status} ${metaResult.error || ''}` }, 500);
-    }
+    await gh.putFile(`data/files/${fileId}.json`, metadata, `Create metadata for ${fileId}`);
 
     return jsonResponse({
       success: true,
@@ -461,17 +389,15 @@ async function handleUpload(request, gh, user, superUser) {
   }
 }
 
+// ========== 保持原有参数不变：handleDownload(fileId, gh) ==========
 async function handleDownload(fileId, gh) {
   try {
-    // ========== FIX: 多次指数退避重试 ==========
-    const metaResult = await retryWithBackoff(async () => {
-      const r = await gh.getFile(`data/files/${fileId}.json`);
-      return r.ok && r.data ? r : null;
-    }, 5, 2000);
+    // 走 Raw CDN 读取 metadata
+    const metaResult = await gh.readRaw(`data/files/${fileId}.json`);
 
-    if (!metaResult) {
+    if (!metaResult.ok) {
       return new Response(
-        JSON.stringify({ error: '文件不存在或已过期', debug: { fileId, checked: 'data/files/' + fileId + '.json', retries: 5 } }),
+        JSON.stringify({ error: '文件不存在或已过期', debug: { fileId, rawStatus: metaResult.status, rawError: metaResult.error } }),
         { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -494,18 +420,13 @@ async function handleDownload(fileId, gh) {
     if (metadata.chunks && metadata.chunks.length > 0) {
       const chunks = [];
       for (const chunkInfo of metadata.chunks) {
-        const chunkResult = await retryWithBackoff(async () => {
-          const r = await gh.getFile(`data/file_data/${chunkInfo.path}`);
-          return r.ok && r.data ? r : null;
-        }, 3, 1500);
-
-        if (!chunkResult) {
+        const chunkResult = await gh.readRaw(`data/file_data/${chunkInfo.path}`);
+        if (!chunkResult.ok) {
           return new Response(
-            JSON.stringify({ error: `分块 ${chunkInfo.index} 读取失败`, debug: { chunkPath: chunkInfo.path } }),
+            JSON.stringify({ error: `分块 ${chunkInfo.index} 读取失败`, debug: { chunkPath: chunkInfo.path, rawStatus: chunkResult.status } }),
             { status: 500, headers: { 'Content-Type': 'application/json' } }
           );
         }
-
         let chunkData = chunkResult.data;
         if (typeof chunkData === 'object' && chunkData.data) chunkData = chunkData.data;
         if (typeof chunkData === 'string') {
@@ -521,18 +442,13 @@ async function handleDownload(fileId, gh) {
       }
       fileData = merged.buffer;
     } else {
-      const fileResult = await retryWithBackoff(async () => {
-        const r = await gh.getFile(`data/file_data/${metadata.path}`);
-        return r.ok && r.data ? r : null;
-      }, 3, 1500);
-
-      if (!fileResult) {
+      const fileResult = await gh.readRaw(`data/file_data/${metadata.path}`);
+      if (!fileResult.ok) {
         return new Response(
-          JSON.stringify({ error: '文件数据读取失败', debug: { filePath: metadata.path } }),
+          JSON.stringify({ error: '文件数据读取失败', debug: { filePath: metadata.path, rawStatus: fileResult.status } }),
           { status: 404, headers: { 'Content-Type': 'application/json' } }
         );
       }
-
       let base64Data = fileResult.data;
       if (typeof base64Data === 'object' && base64Data.data) base64Data = base64Data.data;
       if (typeof base64Data !== 'string') {
@@ -564,7 +480,7 @@ async function handleDownload(fileId, gh) {
 
 async function handleDelete(fileId, gh, user) {
   try {
-    const metaResult = await gh.getFile(`data/files/${fileId}.json`);
+    const metaResult = await gh.readRaw(`data/files/${fileId}.json`);
     if (!metaResult.ok || !metaResult.data) {
       return jsonResponse({ error: '文件不存在' }, 404);
     }
@@ -586,21 +502,6 @@ async function handleDelete(fileId, gh, user) {
   }
 }
 
-// ========== FIX: 调试端点 ==========
-async function handleDebug(fileId, gh) {
-  const metaResult = await gh.getFile(`data/files/${fileId}.json`);
-  const fileResult = metaResult.ok && metaResult.data 
-    ? await gh.getFile(`data/file_data/${metaResult.data.path || fileId}`)
-    : { ok: false, error: 'metadata not found' };
-
-  return jsonResponse({
-    fileId,
-    metadata: metaResult,
-    fileData: fileResult,
-    timestamp: Date.now(),
-  });
-}
-
 async function handleAdmin(gh, user, superUser) {
   if (!superUser) {
     return new Response('无权访问', { status: 403 });
@@ -611,7 +512,7 @@ async function handleAdmin(gh, user, superUser) {
     let totalSize = 0;
     for (const f of files) {
       if (f.type === 'file' && f.name.endsWith('.json')) {
-        const meta = await gh.getFile(`data/files/${f.name}`);
+        const meta = await gh.readRaw(`data/files/${f.name}`);
         if (meta.ok && meta.data) {
           totalSize += meta.data.size || 0;
           fileList.push({
@@ -878,9 +779,6 @@ body {
       <div>有效期: <span id="fileExpiry"></span></div>
       <div>分块: <span id="fileChunks"></span></div>
     </div>
-    <div style="margin-top:12px;font-size:0.8rem;color:#888;">
-      调试: <a id="debugLink" href="#" target="_blank" style="color:#00d4ff;">查看文件状态</a>
-    </div>
   </div>
   <div class="admin-link">
     <a href="/share/admin">📊 管理后台</a>
@@ -953,7 +851,6 @@ async function uploadFile(file) {
       document.getElementById('fileSize').textContent = data.sizeFormatted;
       document.getElementById('fileExpiry').textContent = data.expiresIn;
       document.getElementById('fileChunks').textContent = data.isChunked ? data.chunks + ' 块' : '否';
-      document.getElementById('debugLink').href = data.url.replace('/share/', '/share/debug/');
       result.classList.add('show');
     } else {
       alert(data.error || '上传失败');
@@ -1031,7 +928,7 @@ body {
 .stat-card .number {
   font-size: 2rem;
   font-weight: bold;
-  color: #00d4ff;
+  color: #00d0ff;
 }
 .stat-card .label {
   color: #888;
