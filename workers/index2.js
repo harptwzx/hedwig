@@ -1,5 +1,5 @@
 import api from './api.js';
-import hfProxy from './hf-proxy.js';
+import hfProxy from './share.js';
 import fileShare from './share.js';
 
 export default {
