@@ -17,11 +17,6 @@ class GitHubStorage {
     };
   }
 
-  // ========== FIX: 路径编码 ==========
-  encodePath(path) {
-    return path.split('/').map(encodeURIComponent).join('/');
-  }
-
   async request(path, options) {
     const url = path.startsWith('http') ? path : `${this.baseUrl}${path}`;
     const resp = await fetch(url, {
@@ -33,8 +28,7 @@ class GitHubStorage {
 
   async getFile(path) {
     try {
-      const encodedPath = this.encodePath(path);
-      const resp = await this.request(`/contents/${encodedPath}`);
+      const resp = await this.request(`/contents/${path}`);
       if (resp.status === 404) return { ok: false, status: 404, data: null };
       if (!resp.ok) {
         const text = await resp.text();
@@ -72,68 +66,45 @@ class GitHubStorage {
     }
   }
 
-  // ========== FIX: putFile 422 自动重试 ==========
   async putFile(path, content, message) {
     const contentStr = typeof content === 'string' ? content : JSON.stringify(content);
     const base64Content = btoa(contentStr);
-    const encodedPath = this.encodePath(path);
-
-    async function doPut(sha) {
-      const body = {
-        message: message || `Update ${path}`,
-        content: base64Content,
-        ...(sha ? { sha } : {}),
-      };
-      const resp = await this.request(`/contents/${encodedPath}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => 'unknown');
-        return { ok: false, status: resp.status, error: text };
+    let sha = null;
+    try {
+      const resp = await this.request(`/contents/${path}`);
+      if (resp.status === 200) {
+        const data = await resp.json();
+        sha = data.sha;
       }
-      return { ok: true, status: resp.status };
+    } catch {}
+    const body = {
+      message: message || `Update ${path}`,
+      content: base64Content,
+      ...(sha ? { sha } : {}),
+    };
+    const resp = await this.request(`/contents/${path}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => 'unknown');
+      return { ok: false, status: resp.status, error: text };
     }
-
-    // 先尝试不带 sha（创建新文件）
-    let result = await doPut.call(this, null);
-
-    // 如果 422 且提示缺少 sha，说明文件已存在，重新获取 sha 后重试
-    if (!result.ok && result.status === 422) {
-      const errorText = (result.error || '').toLowerCase();
-      if (errorText.includes('sha') || errorText.includes('wasn\'t supplied')) {
-        // 等待 GitHub 同步，然后重新获取 sha
-        await new Promise(r => setTimeout(r, 2000));
-        let sha = null;
-        try {
-          const checkResp = await this.request(`/contents/${encodedPath}`);
-          if (checkResp.status === 200) {
-            const checkData = await checkResp.json();
-            sha = checkData.sha;
-          }
-        } catch (e) {}
-        if (sha) {
-          result = await doPut.call(this, sha);
-        }
-      }
-    }
-
-    return result;
+    return { ok: true, status: resp.status };
   }
 
   async deleteFile(path, message) {
-    const encodedPath = this.encodePath(path);
     let sha = null;
     try {
-      const resp = await this.request(`/contents/${encodedPath}`);
+      const resp = await this.request(`/contents/${path}`);
       if (resp.status === 200) {
         const data = await resp.json();
         sha = data.sha;
       }
     } catch {}
     if (!sha) return { ok: true };
-    const resp = await this.request(`/contents/${encodedPath}`, {
+    const resp = await this.request(`/contents/${path}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -146,8 +117,7 @@ class GitHubStorage {
 
   async listDir(path) {
     try {
-      const encodedPath = this.encodePath(path);
-      const resp = await this.request(`/contents/${encodedPath}`);
+      const resp = await this.request(`/contents/${path}`);
       if (resp.status === 404) return [];
       if (!resp.ok) return [];
       const data = await resp.json();
@@ -300,12 +270,12 @@ export default {
     }
 
     if (path.startsWith('/share/debug/') && request.method === 'GET') {
-      const fileId = path.replace('/share/debug/', '');
+      const fileId = path.replace('/share/debug/', '').replace(/\/$/, '');
       return handleDebug(fileId, gh);
     }
 
     if (path.startsWith('/share/')) {
-      const fileId = path.replace('/share/', '');
+      const fileId = path.replace('/share/', '').replace(/\/$/, '');
       if (!fileId) {
         return new Response(SHARE_HTML, {
           headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -676,480 +646,304 @@ function base64ToArrayBuffer(base64) {
   return bytes.buffer;
 }
 
-const SHARE_HTML = `
-<!DOCTYPE html>
+const SHARE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>文件分享 - Hedwig</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  min-height: 100vh;
-  color: #e0e0e0;
-}
-.container {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 40px 20px;
-}
-.header {
-  text-align: center;
-  margin-bottom: 40px;
-}
-.header h1 {
-  font-size: 2.5rem;
-  background: linear-gradient(90deg, #00d4ff, #7b2cbf);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin-bottom: 10px;
-}
-.header p {
-  color: #888;
-}
-.upload-area {
-  border: 2px dashed #444;
-  border-radius: 16px;
-  padding: 60px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.3s;
-  background: rgba(255,255,255,0.02);
-}
-.upload-area:hover, .upload-area.dragover {
-  border-color: #00d4ff;
-  background: rgba(0,212,255,0.05);
-}
-.upload-area .icon {
-  font-size: 3rem;
-  margin-bottom: 16px;
-}
-.upload-area p {
-  color: #888;
-  margin-bottom: 8px;
-}
-.upload-area .hint {
-  font-size: 0.85rem;
-  color: #666;
-}
-.file-input {
-  display: none;
-}
-.progress-bar {
-  width: 100%;
-  height: 8px;
-  background: #333;
-  border-radius: 4px;
-  overflow: hidden;
-  margin: 20px 0;
-  display: none;
-}
-.progress-bar .progress {
-  height: 100%;
-  background: linear-gradient(90deg, #00d4ff, #7b2cbf);
-  width: 0%;
-  transition: width 0.3s;
-}
-.result {
-  display: none;
-  background: rgba(0,212,255,0.1);
-  border: 1px solid #00d4ff;
-  border-radius: 12px;
-  padding: 24px;
-  margin-top: 20px;
-}
-.result.show { display: block; }
-.result h3 {
-  color: #00d4ff;
-  margin-bottom: 16px;
-}
-.result .link-box {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.result .link-box input {
-  flex: 1;
-  padding: 12px;
-  border: 1px solid #444;
-  border-radius: 8px;
-  background: #1a1a2e;
-  color: #e0e0e0;
-  font-family: monospace;
-}
-.result .link-box button {
-  padding: 12px 20px;
-  border: none;
-  border-radius: 8px;
-  background: #00d4ff;
-  color: #1a1a2e;
-  cursor: pointer;
-  font-weight: bold;
-}
-.result .info {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  font-size: 0.9rem;
-  color: #aaa;
-}
-.result .info span {
-  color: #e0e0e0;
-}
-.admin-link {
-  text-align: center;
-  margin-top: 30px;
-}
-.admin-link a {
-  color: #00d4ff;
-  text-decoration: none;
-}
-.admin-link a:hover {
-  text-decoration: underline;
-}
-.super-options {
-  display: none;
-  margin-top: 20px;
-  padding: 20px;
-  background: rgba(123,44,191,0.1);
-  border: 1px solid #7b2cbf;
-  border-radius: 12px;
-}
-.super-options.show { display: block; }
-.super-options h3 {
-  color: #7b2cbf;
-  margin-bottom: 12px;
-}
-.super-options label {
-  display: block;
-  margin-bottom: 8px;
-  color: #aaa;
-}
-.super-options input {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid #444;
-  border-radius: 8px;
-  background: #1a1a2e;
-  color: #e0e0e0;
-  margin-bottom: 12px;
-}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a1a;color:#eee;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+.container{max-width:800px;margin:0 auto;padding:40px 20px}
+.header{text-align:center;margin-bottom:40px}
+.header h1{font-size:2.2em;color:#7c8cff;margin-bottom:10px}
+.header p{color:#888}
+.upload-area{border:2px dashed #333;border-radius:16px;padding:60px 20px;text-align:center;transition:all .3s;cursor:pointer;background:#1a1a2e}
+.upload-area:hover{border-color:#7c8cff}
+.upload-area.dragover{border-color:#4CAF50;background:rgba(76,175,80,.05)}
+.upload-icon{font-size:48px;margin-bottom:15px}
+.upload-text{font-size:1.1em;color:#aaa;margin-bottom:10px}
+.upload-hint{color:#666;font-size:.9em}
+input[type="file"]{display:none}
+.options{background:#1a1a2e;border:1px solid #333;border-radius:12px;padding:20px;margin-top:20px;display:none}
+.options.show{display:block}
+.option-row{display:flex;gap:15px;margin-bottom:15px;flex-wrap:wrap}
+.option-row label{color:#aaa;min-width:100px;padding-top:8px}
+.option-row input,.option-row select{flex:1;background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:10px 15px;color:#eee;font-size:14px;min-width:200px}
+.option-row input:focus,.option-row select:focus{outline:none;border-color:#7c8cff}
+.upload-btn{background:#4CAF50;color:#fff;border:none;border-radius:8px;padding:14px 40px;font-size:16px;cursor:pointer;width:100%;margin-top:10px}
+.upload-btn:hover{background:#45a049}
+.upload-btn:disabled{background:#333;cursor:not-allowed}
+.progress{background:#1a1a2e;border-radius:12px;padding:20px;margin-top:20px;display:none}
+.progress.show{display:block}
+.progress-bar{background:#333;border-radius:8px;height:20px;overflow:hidden}
+.progress-fill{background:#4CAF50;height:100%;width:0%;transition:width .3s;border-radius:8px}
+.progress-text{text-align:center;margin-top:10px;color:#aaa}
+.result{background:#1a1a2e;border-radius:12px;padding:20px;margin-top:20px;display:none}
+.result.show{display:block}
+.result-url{background:#0a0a1a;border:1px solid #333;border-radius:8px;padding:15px;font-family:monospace;color:#4CAF50;word-break:break-all;margin:10px 0}
+.copy-btn{background:#7c8cff;color:#fff;border:none;border-radius:6px;padding:8px 20px;cursor:pointer;font-size:14px}
+.copy-btn:hover{background:#6a7be0}
+.file-info{color:#aaa;margin-top:10px;font-size:.9em}
+.super-badge{display:inline-block;background:#FFD700;color:#0a0a1a;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:bold;margin-left:10px}
+.footer{text-align:center;color:#666;margin-top:50px;padding:20px}
+.footer a{color:#7c8cff;text-decoration:none}
 </style>
 </head>
 <body>
 <div class="container">
-  <div class="header">
-    <h1>📁 Hedwig 文件分享</h1>
-    <p>简单、快速的临时文件分享服务</p>
-  </div>
-  <div class="upload-area" id="uploadArea">
-    <div class="icon">📁</div>
-    <p>点击或拖拽文件到此处上传</p>
-    <p class="hint">普通用户: 最大 100MB，保存 10 分钟</p>
-  </div>
-  <input type="file" class="file-input" id="fileInput">
-  <div class="progress-bar" id="progressBar">
-    <div class="progress" id="progress"></div>
-  </div>
-  <div class="super-options" id="superOptions">
-    <h3>🌟 超级会员选项</h3>
-    <label>自定义链接 (可选)</label>
-    <input type="text" id="customUrl" placeholder="例如: myfile">
-    <label>有效期 (分钟)</label>
-    <input type="number" id="expiryMinutes" value="10" min="1" max="1440">
-  </div>
-  <div class="result" id="result">
-    <h3>✅ 上传成功！</h3>
-    <div class="link-box">
-      <input type="text" id="shareLink" readonly>
-      <button onclick="copyLink()">复制</button>
-    </div>
-    <div class="info">
-      <div>文件名: <span id="fileName"></span></div>
-      <div>文件大小: <span id="fileSize"></span></div>
-      <div>有效期: <span id="fileExpiry"></span></div>
-      <div>分块: <span id="fileChunks"></span></div>
-    </div>
-    <div style="margin-top:12px;font-size:0.8rem;color:#888;">
-      调试: <a id="debugLink" href="#" target="_blank" style="color:#00d4ff;">查看文件状态</a>
-    </div>
-  </div>
-  <div class="admin-link">
-    <a href="/share/admin">📊 管理后台</a>
-  </div>
+<div class="header">
+<h1>Hedwig 文件分享</h1>
+<p>简单快速的临时文件分享，拖拽即可上传</p>
+</div>
+<div class="upload-area" id="uploadArea">
+<div class="upload-icon">📁</div>
+<div class="upload-text">点击或拖拽文件到此处上传</div>
+<div class="upload-hint">普通用户: 最大 100MB，保存 10 分钟</div>
+</div>
+<input type="file" id="fileInput">
+<div class="options" id="options">
+<div class="option-row">
+<label>文件名</label>
+<input type="text" id="fileName" readonly>
+</div>
+<div class="option-row">
+<label>文件大小</label>
+<input type="text" id="fileSize" readonly>
+</div>
+<div class="option-row super-only" style="display:none">
+<label>自定义网址</label>
+<input type="text" id="customUrl" placeholder="例如: myfile (可选)">
+</div>
+<div class="option-row super-only" style="display:none">
+<label>保存时长</label>
+<select id="expiryMinutes">
+<option value="10">10 分钟</option>
+<option value="30">30 分钟</option>
+<option value="60">1 小时</option>
+<option value="180">3 小时</option>
+<option value="360">6 小时</option>
+<option value="720">12 小时</option>
+<option value="1440">24 小时</option>
+</select>
+</div>
+<button class="upload-btn" id="uploadBtn">上传文件</button>
+</div>
+<div class="progress" id="progress">
+<div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+<div class="progress-text" id="progressText">准备上传...</div>
+</div>
+<div class="result" id="result">
+<h3 style="color:#7c8cff;margin-bottom:10px">上传成功！</h3>
+<p style="color:#aaa">分享链接:</p>
+<div class="result-url" id="resultUrl"></div>
+<button class="copy-btn" onclick="copyUrl()">复制链接</button>
+<div class="file-info" id="fileInfo"></div>
+</div>
+<div class="footer">
+<p>Powered by <a href="https://hedwig.eu.org">Hedwig</a> | 存储于 GitHub</p>
+</div>
 </div>
 <script>
 const uploadArea = document.getElementById('uploadArea');
 const fileInput = document.getElementById('fileInput');
-const progressBar = document.getElementById('progressBar');
+const options = document.getElementById('options');
+const uploadBtn = document.getElementById('uploadBtn');
 const progress = document.getElementById('progress');
 const result = document.getElementById('result');
-const superOptions = document.getElementById('superOptions');
+let selectedFile = null;
 let isSuperUser = false;
-
-async function checkUser() {
-  try {
-    const res = await fetch('/api/current-user');
-    const data = await res.json();
-    if (data.user) {
-      isSuperUser = ['hedwig', 'harptwzx'].includes(data.user.username);
-      if (isSuperUser) superOptions.classList.add('show');
+function checkSuperUser() {
+    const cookie = document.cookie;
+    isSuperUser = cookie.includes('hedwig_session');
+    if (isSuperUser) {
+        document.querySelectorAll('.super-only').forEach(el => el.style.display = 'flex');
+        document.querySelector('.upload-hint').textContent = '超级会员: 最大 500MB，自定义有效期';
+        document.querySelector('.upload-hint').innerHTML += ' <span class="super-badge">SUPER</span>';
     }
-  } catch (e) {}
 }
-checkUser();
-
+checkSuperUser();
 uploadArea.addEventListener('click', () => fileInput.click());
 uploadArea.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  uploadArea.classList.add('dragover');
+    e.preventDefault();
+    uploadArea.classList.add('dragover');
 });
 uploadArea.addEventListener('dragleave', () => {
-  uploadArea.classList.remove('dragover');
+    uploadArea.classList.remove('dragover');
 });
 uploadArea.addEventListener('drop', (e) => {
-  e.preventDefault();
-  uploadArea.classList.remove('dragover');
-  const files = e.dataTransfer.files;
-  if (files.length > 0) uploadFile(files[0]);
+    e.preventDefault();
+    uploadArea.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) handleFile(files[0]);
 });
 fileInput.addEventListener('change', (e) => {
-  if (e.target.files.length > 0) uploadFile(e.target.files[0]);
+    if (e.target.files.length > 0) handleFile(e.target.files[0]);
 });
-
-async function uploadFile(file) {
-  const formData = new FormData();
-  formData.append('file', file);
-  if (isSuperUser) {
-    const customUrl = document.getElementById('customUrl').value;
-    const expiryMinutes = document.getElementById('expiryMinutes').value;
-    if (customUrl) formData.append('customUrl', customUrl);
-    formData.append('expiryMinutes', expiryMinutes);
-  }
-
-  progressBar.style.display = 'block';
-  progress.style.width = '30%';
-
-  try {
-    const res = await fetch('/share/upload', {
-      method: 'POST',
-      body: formData,
-    });
-    progress.style.width = '80%';
-    const data = await res.json();
-    progress.style.width = '100%';
-
-    if (data.success) {
-      document.getElementById('shareLink').value = data.url;
-      document.getElementById('fileName').textContent = data.name;
-      document.getElementById('fileSize').textContent = data.sizeFormatted;
-      document.getElementById('fileExpiry').textContent = data.expiresIn;
-      document.getElementById('fileChunks').textContent = data.isChunked ? data.chunks + ' 块' : '否';
-      document.getElementById('debugLink').href = data.url.replace('/share/', '/share/debug/');
-      result.classList.add('show');
-    } else {
-      alert(data.error || '上传失败');
-    }
-  } catch (error) {
-    alert('上传失败: ' + error.message);
-  } finally {
-    setTimeout(() => {
-      progressBar.style.display = 'none';
-      progress.style.width = '0%';
-    }, 1000);
-  }
+function handleFile(file) {
+    selectedFile = file;
+    document.getElementById('fileName').value = file.name;
+    document.getElementById('fileSize').value = formatSize(file.size);
+    options.classList.add('show');
 }
-
-function copyLink() {
-  const link = document.getElementById('shareLink');
-  link.select();
-  document.execCommand('copy');
-  alert('链接已复制！');
+function formatSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+uploadBtn.addEventListener('click', async () => {
+    if (!selectedFile) return;
+    uploadBtn.disabled = true;
+    progress.classList.add('show');
+    result.classList.remove('show');
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+    if (isSuperUser) {
+        const customUrl = document.getElementById('customUrl').value.trim();
+        const expiry = document.getElementById('expiryMinutes').value;
+        if (customUrl) formData.append('customUrl', customUrl);
+        formData.append('expiryMinutes', expiry);
+    }
+    try {
+        document.getElementById('progressText').textContent = '正在上传...';
+        document.getElementById('progressFill').style.width = '50%';
+        const resp = await fetch('/share/upload', {
+            method: 'POST',
+            body: formData,
+        });
+        document.getElementById('progressFill').style.width = '100%';
+        const data = await resp.json();
+        if (data.success) {
+            document.getElementById('resultUrl').textContent = data.url;
+            document.getElementById('fileInfo').innerHTML = 
+                '文件名: ' + data.name + '<br>大小: ' + data.sizeFormatted + '<br>有效期: ' + data.expiresIn +
+                (data.isChunked ? '<br>分块: ' + data.chunks : '');
+            result.classList.add('show');
+        } else {
+            alert('上传失败: ' + data.error);
+        }
+    } catch (e) {
+        alert('上传出错: ' + e.message);
+    } finally {
+        uploadBtn.disabled = false;
+        setTimeout(() => progress.classList.remove('show'), 1000);
+    }
+});
+function copyUrl() {
+    const url = document.getElementById('resultUrl').textContent;
+    navigator.clipboard.writeText(url).then(() => {
+        alert('链接已复制到剪贴板');
+    });
 }
 </script>
 </body>
-</html>
-`;
+</html>`;
 
-const ADMIN_HTML = `
-<!DOCTYPE html>
+const ADMIN_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>文件管理 - Hedwig</title>
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  min-height: 100vh;
-  color: #e0e0e0;
-}
-.container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 40px 20px;
-}
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 40px;
-}
-.header h1 {
-  font-size: 2rem;
-  background: linear-gradient(90deg, #00d4ff, #7b2cbf);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.header a {
-  color: #00d4ff;
-  text-decoration: none;
-}
-.stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-  margin-bottom: 40px;
-}
-.stat-card {
-  background: rgba(255,255,255,0.05);
-  border: 1px solid #333;
-  border-radius: 12px;
-  padding: 24px;
-  text-align: center;
-}
-.stat-card .number {
-  font-size: 2rem;
-  font-weight: bold;
-  color: #00d4ff;
-}
-.stat-card .label {
-  color: #888;
-  margin-top: 8px;
-}
-.file-list {
-  background: rgba(255,255,255,0.02);
-  border: 1px solid #333;
-  border-radius: 12px;
-  overflow: hidden;
-}
-.file-list table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.file-list th, .file-list td {
-  padding: 16px;
-  text-align: left;
-  border-bottom: 1px solid #333;
-}
-.file-list th {
-  background: rgba(0,212,255,0.1);
-  color: #00d4ff;
-  font-weight: 600;
-}
-.file-list tr:hover {
-  background: rgba(255,255,255,0.03);
-}
-.file-list .expired {
-  color: #ff4444;
-}
-.file-list .actions button {
-  padding: 6px 12px;
-  border: none;
-  border-radius: 6px;
-  background: #ff4444;
-  color: white;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-.file-list .actions button:hover {
-  background: #ff6666;
-}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a1a;color:#eee;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+.container{max-width:1200px;margin:0 auto;padding:40px 20px}
+.header{text-align:center;margin-bottom:40px}
+.header h1{font-size:2.2em;color:#7c8cff;margin-bottom:10px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin-bottom:40px}
+.stat-card{background:#1a1a2e;border:1px solid #333;border-radius:12px;padding:20px;text-align:center}
+.stat-value{font-size:2em;color:#4CAF50;font-weight:bold}
+.stat-label{color:#888;margin-top:5px}
+.file-list{background:#1a1a2e;border:1px solid #333;border-radius:12px;overflow:hidden}
+.file-list-header{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 100px;gap:15px;padding:15px 20px;background:#0a0a1a;color:#7c8cff;font-weight:bold;font-size:.9em}
+.file-item{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 100px;gap:15px;padding:12px 20px;border-top:1px solid #333;align-items:center}
+.file-item:hover{background:rgba(124,140,255,.05)}
+.file-name{color:#eee;word-break:break-all}
+.file-size{color:#aaa}
+.file-uploader{color:#aaa}
+.file-date{color:#888;font-size:.85em}
+.file-status{color:#4CAF50}
+.file-status.expired{color:#f44336}
+.file-actions{display:flex;gap:8px}
+.file-actions button{background:#333;border:none;color:#eee;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+.file-actions button:hover{background:#f44336}
+.back-btn{display:inline-block;background:#7c8cff;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;margin-bottom:20px}
+.back-btn:hover{background:#6a7be0}
+.usage-bar{background:#333;border-radius:8px;height:20px;overflow:hidden;margin-top:10px}
+.usage-fill{background:#4CAF50;height:100%;border-radius:8px}
 </style>
 </head>
 <body>
 <div class="container">
-  <div class="header">
-    <h1>📊 文件管理后台</h1>
-    <a href="/share">← 返回上传页面</a>
-  </div>
-  <div class="stats">
-    <div class="stat-card">
-      <div class="number">{{fileCount}}</div>
-      <div class="label">文件总数</div>
-    </div>
-    <div class="stat-card">
-      <div class="number">{{totalSize}}</div>
-      <div class="label">已用空间</div>
-    </div>
-    <div class="stat-card">
-      <div class="number">{{maxSize}}</div>
-      <div class="label">总容量</div>
-    </div>
-    <div class="stat-card">
-      <div class="number">{{usagePercent}}%</div>
-      <div class="label">使用率</div>
-    </div>
-  </div>
-  <div class="file-list">
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>文件名</th>
-          <th>大小</th>
-          <th>上传者</th>
-          <th>上传时间</th>
-          <th>过期时间</th>
-          <th>状态</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="fileTableBody"></tbody>
-    </table>
-  </div>
+<div class="header">
+<h1>文件管理</h1>
+<p>查看和管理所有上传的文件</p>
+</div>
+<a href="/share" class="back-btn">返回上传页面</a>
+<div class="stats">
+<div class="stat-card">
+<div class="stat-value">{{fileCount}}</div>
+<div class="stat-label">文件总数</div>
+</div>
+<div class="stat-card">
+<div class="stat-value">{{totalSize}}</div>
+<div class="stat-label">已用空间</div>
+</div>
+<div class="stat-card">
+<div class="stat-value">{{maxSize}}</div>
+<div class="stat-label">总容量</div>
+</div>
+<div class="stat-card">
+<div class="stat-value">{{usagePercent}}%</div>
+<div class="stat-label">使用率</div>
+<div class="usage-bar"><div class="usage-fill" style="width:{{usagePercent}}%"></div></div>
+</div>
+</div>
+<div class="file-list">
+<div class="file-list-header">
+<div>文件名</div>
+<div>大小</div>
+<div>上传者</div>
+<div>上传时间</div>
+<div>状态</div>
+<div>操作</div>
+</div>
+<div id="fileList"></div>
+</div>
 </div>
 <script>
-const fileList = {{fileList}};
-const tbody = document.getElementById('fileTableBody');
-fileList.forEach(file => {
-  const tr = document.createElement('tr');
-  if (file.isExpired) tr.classList.add('expired');
-  tr.innerHTML = \`
-    <td>\${file.id}</td>
-    <td>\${file.name}</td>
-    <td>\${file.size}</td>
-    <td>\${file.uploadedBy}</td>
-    <td>\${file.uploadedAt}</td>
-    <td>\${file.expiresAt}</td>
-    <td>\${file.isExpired ? '<span class="expired">已过期</span>' : '有效'}</td>
-    <td class="actions">
-      <button onclick="deleteFile('\${file.id}')">删除</button>
-    </td>
-  \`;
-  tbody.appendChild(tr);
+const files = {{fileList}};
+const listEl = document.getElementById('fileList');
+files.forEach(file => {
+    const div = document.createElement('div');
+    div.className = 'file-item';
+    div.innerHTML = '<div class="file-name">' + file.name + (file.isChunked ? ' <span style="color:#FFD700">[分块]</span>' : '') + '</div>' +
+        '<div class="file-size">' + file.size + '</div>' +
+        '<div class="file-uploader">' + file.uploadedBy + '</div>' +
+        '<div class="file-date">' + file.uploadedAt + '</div>' +
+        '<div class="file-status ' + (file.isExpired ? 'expired' : '') + '">' + (file.isExpired ? '已过期' : '有效') + '</div>' +
+        '<div class="file-actions"><button onclick="deleteFile(\\'' + file.id + '\\')">删除</button></div>';
+    listEl.appendChild(div);
 });
-
 async function deleteFile(id) {
-  if (!confirm('确定要删除这个文件吗？')) return;
-  try {
-    const res = await fetch(\`/share/\${id}\`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.success) {
-      location.reload();
-    } else {
-      alert(data.error || '删除失败');
+    if (!confirm('确定要删除这个文件吗?')) return;
+    try {
+        const resp = await fetch('/share/' + id, { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.success) {
+            alert('删除成功');
+            location.reload();
+        } else {
+            alert('删除失败: ' + data.error);
+        }
+    } catch (e) {
+        alert('请求出错: ' + e.message);
     }
-  } catch (e) {
-    alert('删除失败');
-  }
 }
 </script>
 </body>
-</html>
-`;
+</html>`;
