@@ -415,6 +415,7 @@ async function handleDownload(request, env) {
   const url = new URL(request.url);
   const fileId = url.searchParams.get('id');
   const chunkIndex = url.searchParams.get('chunk');
+  const merge = url.searchParams.get('merge');
 
   if (!fileId) throw new Error('File ID required');
 
@@ -435,6 +436,29 @@ async function handleDownload(request, env) {
   await saveMeta(token, meta);
 
   if (fileMeta.chunks && fileMeta.chunks.length > 0) {
+    if (merge === '1') {
+      const chunks = [];
+      for (let i = 0; i < fileMeta.chunks.length; i++) {
+        const data = await downloadFromGitHub(token, CONFIG.BASE_PATH + '/' + fileMeta.chunks[i].id);
+        chunks.push(new Uint8Array(data));
+      }
+      const totalSize = chunks.reduce((sum, c) => sum + c.length, 0);
+      const merged = new Uint8Array(totalSize);
+      let offset = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        merged.set(chunks[i], offset);
+        offset += chunks[i].length;
+      }
+      return new Response(merged.buffer, {
+        headers: {
+          'Content-Type': fileMeta.mimeType,
+          'Content-Disposition': 'attachment; filename="' + fileMeta.filename + '"',
+          'Content-Length': totalSize,
+          ...corsHeaders()
+        }
+      });
+    }
+
     if (chunkIndex !== null) {
       const idx = parseInt(chunkIndex);
       if (idx < 0 || idx >= fileMeta.chunks.length) {
@@ -457,7 +481,8 @@ async function handleDownload(request, env) {
         chunks: fileMeta.chunks,
         filename: fileMeta.filename,
         totalSize: fileMeta.size,
-        mimeType: fileMeta.mimeType
+        mimeType: fileMeta.mimeType,
+        mergeUrl: new URL(request.url).origin + '/api/file/download?id=' + fileId + '&merge=1'
       }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders() }
       });
@@ -709,6 +734,7 @@ function getFrontendHTML() {
 '    .btn { width: 100%; padding: 15px; border: none; border-radius: 10px; background: linear-gradient(45deg, #00d4ff, #7b2ff7); color: #fff; font-size: 1.1em; cursor: pointer; transition: transform 0.2s; margin-top: 10px; }' +
 '    .btn:hover { transform: translateY(-2px); }' +
 '    .btn:disabled { opacity: 0.5; cursor: not-allowed; }' +
+'    .btn-secondary { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); }' +
 '    .result { margin-top: 20px; padding: 20px; background: rgba(0,255,0,0.05); border: 1px solid rgba(0,255,0,0.2); border-radius: 10px; display: none; }' +
 '    .result.active { display: block; }' +
 '    .result.error { background: rgba(255,0,0,0.05); border-color: rgba(255,0,0,0.2); }' +
@@ -718,6 +744,11 @@ function getFrontendHTML() {
 '    .progress-fill { height: 100%; background: linear-gradient(45deg, #00d4ff, #7b2ff7); transition: width 0.3s; }' +
 '    .speed-info { margin-top: 8px; font-size: 0.85em; color: #00d4ff; text-align: center; min-height: 1.2em; }' +
 '    .chunk-status { margin-top: 4px; font-size: 0.85em; color: #aaa; text-align: center; min-height: 1.2em; }' +
+'    .download-section { margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); }' +
+'    .download-section h4 { color: #00d4ff; margin-bottom: 10px; }' +
+'    .chunk-list { max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.2); border-radius: 5px; padding: 10px; margin-top: 10px; }' +
+'    .chunk-list a { color: #00d4ff; text-decoration: none; display: block; padding: 3px 0; font-family: monospace; font-size: 0.85em; }' +
+'    .chunk-list a:hover { text-decoration: underline; }' +
 '  </style>' +
 '</head>' +
 '<body>' +
@@ -758,8 +789,13 @@ function getFrontendHTML() {
 '      <p>下载链接（点击复制）：</p>' +
 '      <div class="link-box" id="linkBox"></div>' +
 '      <p id="expireText"></p>' +
-'      <div id="chunkDownload" style="display:none; margin-top: 10px;">' +
-'        <p>此文件已切片</p>' +
+'      <div id="mergeSection" style="display:none;" class="download-section">' +
+'        <h4>切片文件下载</h4>' +
+'        <button class="btn btn-secondary" id="mergeBtn">直接下载完整文件（服务端合并）</button>' +
+'        <div style="margin-top:10px;">' +
+'          <p style="color:#888;font-size:0.85em;">或手动下载切片后合并：</p>' +
+'          <div class="chunk-list" id="chunkList"></div>' +
+'        </div>' +
 '      </div>' +
 '    </div>' +
 '    <div class="stats" id="stats">' +
@@ -778,6 +814,7 @@ function getFrontendHTML() {
 '    let selectedFile = null;' +
 '    let isSuper = false;' +
 '    let currentUser = null;' +
+'    let lastFileData = null;' +
 '    async function checkUser() {' +
 '      try {' +
 '        const res = await fetch("/api/current-user", { credentials: "include" });' +
@@ -814,6 +851,7 @@ function getFrontendHTML() {
 '      document.getElementById("speedInfo").textContent = "准备上传...";' +
 '      document.getElementById("chunkStatus").textContent = "";' +
 '      result.classList.remove("active", "error");' +
+'      document.getElementById("mergeSection").style.display = "none";' +
 '      try {' +
 '        const formData = new FormData();' +
 '        formData.append("file", selectedFile);' +
@@ -869,7 +907,6 @@ function getFrontendHTML() {
 '          binary += batchStr;' +
 '        }' +
 '        const base64 = btoa(binary);' +
-'        const chunkStart = Date.now();' +
 '        const res = await fetch("/api/file/upload-chunk", {' +
 '          method: "POST",' +
 '          headers: { "Content-Type": "application/json" },' +
@@ -923,14 +960,20 @@ function getFrontendHTML() {
 '      showResult(finalData);' +
 '    }' +
 '    function showResult(data) {' +
+'      lastFileData = data;' +
 '      result.classList.remove("error");' +
 '      result.classList.add("active");' +
-'      document.getElementById("linkBox").textContent = data.downloadUrl;' +
-'      document.getElementById("linkBox").onclick = () => { navigator.clipboard.writeText(data.downloadUrl); alert("已复制到剪贴板"); };' +
+'      const host = window.location.origin;' +
+'      const downloadUrl = host + "/api/file/download?id=" + data.fileId + (data.chunked ? "&merge=1" : "");' +
+'      document.getElementById("linkBox").textContent = downloadUrl;' +
+'      document.getElementById("linkBox").onclick = () => { navigator.clipboard.writeText(downloadUrl); alert("已复制到剪贴板"); };' +
 '      const expire = new Date(data.expiresAt);' +
 '      document.getElementById("expireText").textContent = "过期时间：" + expire.toLocaleString() + (data.isSuper ? " [超级用户]" : "");' +
 '      if (data.chunked) {' +
-'        document.getElementById("chunkDownload").style.display = "block";' +
+'        document.getElementById("mergeSection").style.display = "block";' +
+'        document.getElementById("mergeBtn").onclick = () => { window.location.href = downloadUrl; };' +
+'      } else {' +
+'        document.getElementById("mergeSection").style.display = "none";' +
 '      }' +
 '    }' +
 '    function showError(msg) {' +
