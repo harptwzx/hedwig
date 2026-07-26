@@ -244,20 +244,6 @@
     "downloads": 13,
     "finalized": true
   },
-  "c7398357a6ed419b": {
-    "id": "c7398357a6ed419b",
-    "filename": "background-night.png",
-    "size": 796,
-    "mimeType": "image/png",
-    "createdAt": 1785048380819,
-    "expiresAt": 1785048980819,
-    "owner": "hedwig",
-    "isSuper": true,
-    "chunks": null,
-    "chunkCount": 1,
-    "downloads": 0,
-    "finalized": true
-  },
   "1c545e1345b59768": {
     "id": "1c545e1345b59768",
     "filename": "5 - Harry Potter and the Order of the Phoenix.pdf",
