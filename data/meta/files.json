@@ -257,5 +257,25 @@
     "chunkCount": 1,
     "downloads": 0,
     "finalized": true
+  },
+  "1c545e1345b59768": {
+    "id": "1c545e1345b59768",
+    "filename": "5 - Harry Potter and the Order of the Phoenix.pdf",
+    "size": 2892394,
+    "mimeType": "application/pdf",
+    "createdAt": 1785048488310,
+    "expiresAt": "2026-07-26T06:58:01.423Z",
+    "owner": "hedwig",
+    "isSuper": true,
+    "chunks": [
+      {
+        "index": 0,
+        "id": "1c545e1345b59768_part0",
+        "size": 716800
+      }
+    ],
+    "chunkCount": 5,
+    "downloads": 0,
+    "finalized": false
   }
 }
