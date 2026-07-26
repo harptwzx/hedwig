@@ -12,5 +12,25 @@
     "chunkCount": 1,
     "downloads": 0,
     "finalized": true
+  },
+  "test1": {
+    "id": "test1",
+    "filename": "Kimi_Agent_哈迷名言巫师网页.zip",
+    "size": 32415686,
+    "mimeType": "application/zip",
+    "createdAt": 1785046748391,
+    "expiresAt": "2026-07-26T06:29:03.597Z",
+    "owner": "hedwig",
+    "isSuper": true,
+    "chunks": [
+      {
+        "index": 0,
+        "id": "test1_part0",
+        "size": 716800
+      }
+    ],
+    "chunkCount": 46,
+    "downloads": 0,
+    "finalized": false
   }
 }
