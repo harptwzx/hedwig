@@ -5,7 +5,7 @@ const CONFIG = {
   BASE_PATH: 'data/files',
   META_PATH: 'data/meta/files.json',
   SESSIONS_PATH: 'data/sessions/',
-  CHUNK_SIZE: 50 * 1024 * 1024,
+  CHUNK_SIZE: 45 * 1024 * 1024,
   MAX_NORMAL_SIZE: 100 * 1024 * 1024,
   TOTAL_CAPACITY: 500 * 1024 * 1024,
   DEFAULT_TTL: 10 * 60 * 1000,
@@ -160,6 +160,14 @@ export default {
         return await handleUpload(request, env);
       }
 
+      if (path === '/api/file/upload-chunk' && request.method === 'POST') {
+        return await handleUploadChunk(request, env);
+      }
+
+      if (path === '/api/file/finalize' && request.method === 'POST') {
+        return await handleFinalize(request, env);
+      }
+
       if (path === '/api/file/download' && request.method === 'GET') {
         return await handleDownload(request, env);
       }
@@ -201,33 +209,11 @@ async function handleUpload(request, env) {
   const currentUser = await getCurrentUser(request, env);
   const isSuper = currentUser === CONFIG.SUPER_USER;
 
-  const contentType = request.headers.get('Content-Type') || '';
-  let fileData, filename, customSlug, customTtl;
-
-  if (contentType.includes('multipart/form-data')) {
-    const formData = await request.formData();
-    fileData = formData.get('file');
-    filename = fileData.name;
-    customSlug = formData.get('slug') || '';
-    customTtl = parseInt(formData.get('ttl')) || 0;
-  } else if (contentType.includes('application/json')) {
-    const json = await request.json();
-    const binary = atob(json.data);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    fileData = {
-      arrayBuffer: () => Promise.resolve(bytes.buffer),
-      size: json.size,
-      type: json.mimeType || 'application/octet-stream'
-    };
-    filename = json.filename;
-    customSlug = json.slug || '';
-    customTtl = json.ttl || 0;
-  } else {
-    throw new Error('Unsupported Content-Type');
-  }
+  const formData = await request.formData();
+  const fileData = formData.get('file');
+  const filename = fileData.name;
+  const customSlug = formData.get('slug') || '';
+  const customTtl = parseInt(formData.get('ttl')) || 0;
 
   if (!fileData || !filename) {
     throw new Error('No file provided');
@@ -267,22 +253,28 @@ async function handleUpload(request, env) {
     fileId = await generateHash(fileBuffer, filename);
   }
 
-  const needsChunking = isSuper && fileSize > CONFIG.CHUNK_SIZE;
+  const needsChunking = fileSize > CONFIG.CHUNK_SIZE;
   let chunks = [];
 
   if (needsChunking) {
     const totalChunks = Math.ceil(fileSize / CONFIG.CHUNK_SIZE);
-    for (let i = 0; i < totalChunks; i++) {
-      const start = i * CONFIG.CHUNK_SIZE;
-      const end = Math.min(start + CONFIG.CHUNK_SIZE, fileSize);
-      const chunkBuffer = fileBuffer.slice(start, end);
-      const chunkId = fileId + '_part' + i;
-      await uploadToGitHub(token, CONFIG.BASE_PATH + '/' + chunkId, chunkBuffer);
-      chunks.push({ index: i, id: chunkId, size: end - start });
-    }
-  } else {
-    await uploadToGitHub(token, CONFIG.BASE_PATH + '/' + fileId, fileBuffer);
+    return new Response(JSON.stringify({
+      success: true,
+      chunked: true,
+      fileId: fileId,
+      totalChunks: totalChunks,
+      chunkSize: CONFIG.CHUNK_SIZE,
+      filename: filename,
+      fileSize: fileSize,
+      expiresAt: new Date(expiresAt).toISOString(),
+      isSuper: isSuper,
+      owner: currentUser || 'anonymous'
+    }), {
+      headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+    });
   }
+
+  await uploadToGitHub(token, CONFIG.BASE_PATH + '/' + fileId, fileBuffer);
 
   const meta = await getMeta(token);
   const fileMeta = {
@@ -294,9 +286,10 @@ async function handleUpload(request, env) {
     expiresAt: expiresAt,
     owner: currentUser || 'anonymous',
     isSuper: isSuper,
-    chunks: needsChunking ? chunks : null,
-    chunkCount: needsChunking ? chunks.length : 1,
-    downloads: 0
+    chunks: null,
+    chunkCount: 1,
+    downloads: 0,
+    finalized: true
   };
 
   meta[fileId] = fileMeta;
@@ -311,10 +304,96 @@ async function handleUpload(request, env) {
     downloadUrl: downloadUrl,
     expiresAt: new Date(expiresAt).toISOString(),
     isSuper: isSuper,
-    chunked: needsChunking,
-    chunkCount: needsChunking ? chunks.length : 1,
+    chunked: false,
     size: fileSize,
     owner: currentUser || 'anonymous'
+  }), {
+    headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+  });
+}
+
+async function handleUploadChunk(request, env) {
+  const token = env.GITHUB_TOKEN;
+  const json = await request.json();
+  const fileId = json.fileId;
+  const chunkIndex = json.chunkIndex;
+  const totalChunks = json.totalChunks;
+  const data = json.data;
+  const filename = json.filename;
+  const fileSize = json.fileSize;
+  const isSuper = json.isSuper;
+  const owner = json.owner;
+  const expiresAt = json.expiresAt;
+  const mimeType = json.mimeType || 'application/octet-stream';
+
+  if (!fileId || chunkIndex === undefined || !data) {
+    throw new Error('Missing chunk data');
+  }
+
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  const chunkId = fileId + '_part' + chunkIndex;
+  await uploadToGitHub(token, CONFIG.BASE_PATH + '/' + chunkId, bytes.buffer);
+
+  const meta = await getMeta(token);
+  if (!meta[fileId]) {
+    meta[fileId] = {
+      id: fileId,
+      filename: filename,
+      size: fileSize,
+      mimeType: mimeType,
+      createdAt: Date.now(),
+      expiresAt: expiresAt,
+      owner: owner,
+      isSuper: isSuper,
+      chunks: [],
+      chunkCount: totalChunks,
+      downloads: 0,
+      finalized: false
+    };
+  }
+
+  meta[fileId].chunks.push({ index: chunkIndex, id: chunkId, size: bytes.length });
+  await saveMeta(token, meta);
+
+  return new Response(JSON.stringify({
+    success: true,
+    chunkIndex: chunkIndex,
+    totalChunks: totalChunks
+  }), {
+    headers: { 'Content-Type': 'application/json', ...corsHeaders() }
+  });
+}
+
+async function handleFinalize(request, env) {
+  const token = env.GITHUB_TOKEN;
+  const json = await request.json();
+  const fileId = json.fileId;
+
+  const meta = await getMeta(token);
+  if (!meta[fileId]) {
+    throw new Error('File not found');
+  }
+
+  meta[fileId].finalized = true;
+  await saveMeta(token, meta);
+
+  const host = new URL(request.url).origin;
+  const downloadUrl = host + '/api/file/download?id=' + fileId;
+
+  return new Response(JSON.stringify({
+    success: true,
+    fileId: fileId,
+    downloadUrl: downloadUrl,
+    expiresAt: new Date(meta[fileId].expiresAt).toISOString(),
+    isSuper: meta[fileId].isSuper,
+    chunked: true,
+    size: meta[fileId].size,
+    owner: meta[fileId].owner
   }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders() }
   });
@@ -620,7 +699,8 @@ function getFrontendHTML() {
 '    .stats { margin-top: 20px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 0.9em; color: #888; }' +
 '    .progress-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 10px; overflow: hidden; }' +
 '    .progress-fill { height: 100%; background: linear-gradient(45deg, #00d4ff, #7b2ff7); transition: width 0.3s; }' +
-'    .chunk-info { margin-top: 10px; font-size: 0.85em; color: #aaa; }' +
+'    .speed-info { margin-top: 8px; font-size: 0.85em; color: #00d4ff; text-align: center; }' +
+'    .chunk-status { margin-top: 8px; font-size: 0.85em; color: #aaa; text-align: center; }' +
 '  </style>' +
 '</head>' +
 '<body>' +
@@ -654,14 +734,15 @@ function getFrontendHTML() {
 '    <div class="progress-bar" id="progressBar" style="display:none;">' +
 '      <div class="progress-fill" id="progressFill" style="width: 0%"></div>' +
 '    </div>' +
-'    <div class="chunk-info" id="chunkInfo"></div>' +
+'    <div class="speed-info" id="speedInfo"></div>' +
+'    <div class="chunk-status" id="chunkStatus"></div>' +
 '    <div class="result" id="result">' +
 '      <h3>上传成功</h3>' +
 '      <p>下载链接（点击复制）：</p>' +
 '      <div class="link-box" id="linkBox"></div>' +
 '      <p id="expireText"></p>' +
 '      <div id="chunkDownload" style="display:none; margin-top: 10px;">' +
-'        <p>此文件已切片，下载所有切片后合并</p>' +
+'        <p>此文件已切片</p>' +
 '      </div>' +
 '    </div>' +
 '    <div class="stats" id="stats">' +
@@ -713,6 +794,8 @@ function getFrontendHTML() {
 '      uploadBtn.disabled = true;' +
 '      uploadBtn.textContent = "上传中...";' +
 '      document.getElementById("progressBar").style.display = "block";' +
+'      document.getElementById("speedInfo").textContent = "";' +
+'      document.getElementById("chunkStatus").textContent = "";' +
 '      try {' +
 '        const formData = new FormData();' +
 '        formData.append("file", selectedFile);' +
@@ -722,10 +805,14 @@ function getFrontendHTML() {
 '          if (slug) formData.append("slug", slug);' +
 '          if (ttl) formData.append("ttl", ttl);' +
 '        }' +
-'        const res = await fetch("/api/file/upload", { method: "POST", body: formData, credentials: "include" });' +
-'        const data = await res.json();' +
-'        if (!res.ok) throw new Error(data.error || "上传失败");' +
-'        showResult(data);' +
+'        const initRes = await fetch("/api/file/upload", { method: "POST", body: formData, credentials: "include" });' +
+'        const initData = await initRes.json();' +
+'        if (!initRes.ok) throw new Error(initData.error || "上传失败");' +
+'        if (initData.chunked) {' +
+'          await uploadChunks(selectedFile, initData);' +
+'        } else {' +
+'          showResult(initData);' +
+'        }' +
 '      } catch (err) {' +
 '        showError(err.message);' +
 '      } finally {' +
@@ -733,6 +820,61 @@ function getFrontendHTML() {
 '        uploadBtn.textContent = "上传文件";' +
 '      }' +
 '    });' +
+'    async function uploadChunks(file, initData) {' +
+'      const chunkSize = initData.chunkSize;' +
+'      const totalChunks = initData.totalChunks;' +
+'      const fileId = initData.fileId;' +
+'      const startTime = Date.now();' +
+'      let uploadedBytes = 0;' +
+'      for (let i = 0; i < totalChunks; i++) {' +
+'        const start = i * chunkSize;' +
+'        const end = Math.min(start + chunkSize, file.size);' +
+'        const chunk = file.slice(start, end);' +
+'        const buffer = await chunk.arrayBuffer();' +
+'        const bytes = new Uint8Array(buffer);' +
+'        let binary = "";' +
+'        for (let j = 0; j < bytes.length; j++) {' +
+'          binary += String.fromCharCode(bytes[j]);' +
+'        }' +
+'        const base64 = btoa(binary);' +
+'        const chunkStart = Date.now();' +
+'        const res = await fetch("/api/file/upload-chunk", {' +
+'          method: "POST",' +
+'          headers: { "Content-Type": "application/json" },' +
+'          body: JSON.stringify({' +
+'            fileId: fileId,' +
+'            chunkIndex: i,' +
+'            totalChunks: totalChunks,' +
+'            data: base64,' +
+'            filename: initData.filename,' +
+'            fileSize: initData.fileSize,' +
+'            isSuper: initData.isSuper,' +
+'            owner: initData.owner,' +
+'            expiresAt: initData.expiresAt,' +
+'            mimeType: file.type || "application/octet-stream"' +
+'          }),' +
+'          credentials: "include"' +
+'        });' +
+'        const data = await res.json();' +
+'        if (!res.ok) throw new Error(data.error || "切片上传失败");' +
+'        uploadedBytes += (end - start);' +
+'        const elapsed = (Date.now() - startTime) / 1000;' +
+'        const speed = uploadedBytes / elapsed;' +
+'        const percent = Math.round((uploadedBytes / file.size) * 100);' +
+'        document.getElementById("progressFill").style.width = percent + "%";' +
+'        document.getElementById("speedInfo").textContent = formatBytes(speed) + "/s - " + percent + "%";' +
+'        document.getElementById("chunkStatus").textContent = "切片 " + (i + 1) + "/" + totalChunks + " 完成";' +
+'      }' +
+'      const finalRes = await fetch("/api/file/finalize", {' +
+'        method: "POST",' +
+'        headers: { "Content-Type": "application/json" },' +
+'        body: JSON.stringify({ fileId: fileId }),' +
+'        credentials: "include"' +
+'      });' +
+'      const finalData = await finalRes.json();' +
+'      if (!finalRes.ok) throw new Error(finalData.error || " finalize 失败");' +
+'      showResult(finalData);' +
+'    }' +
 '    function showResult(data) {' +
 '      result.classList.remove("error");' +
 '      result.classList.add("active");' +
