@@ -10,10 +10,10 @@ export default {
             return hfProxy.fetch(request, env, ctx);
         }
 
-        if (pathname.startsWith('/api/file/') || pathname === '/f') {
-            return import('./file-share.js').then(m => m.default.fetch(request, env, ctx));
-}
-
+        // 文件分享路由 - 匹配 /share 和 /api/file/*
+        if (url.pathname === '/share' || url.pathname.startsWith('/api/file/')) {
+            return fileShare.fetch(request, env, ctx);
+        }
 
         return api.fetch(request, env, ctx);
     },
