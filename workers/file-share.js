@@ -1,24 +1,15 @@
-/**
- * Hedwig File Share System v2.1 - Fixed
- * - Compatible with api.js user system
- * - Normal users: 10min expiry, SHA-256 hash link, <=100MB
- * - Super user (hedwig): custom slug/ttl, auto-chunking for large files
- * - Total capacity: 500MB
- */
-
 const CONFIG = {
   OWNER: 'harptwzx',
   REPO: 'hedwig',
   BRANCH: 'main',
   BASE_PATH: 'data/files',
   META_PATH: 'data/meta/files.json',
-  USERS_PATH: 'data/users/',
   SESSIONS_PATH: 'data/sessions/',
   CHUNK_SIZE: 50 * 1024 * 1024,
   MAX_NORMAL_SIZE: 100 * 1024 * 1024,
   TOTAL_CAPACITY: 500 * 1024 * 1024,
   DEFAULT_TTL: 10 * 60 * 1000,
-  SUPER_USER: 'hedwig',
+  SUPER_USER: 'hedwig'
 };
 
 function base64Encode(str) {
@@ -185,10 +176,6 @@ export default {
         return await handleCleanup(request, env);
       }
 
-      if (path === '/api/file/merge' && request.method === 'POST') {
-        return await handleMerge(request, env);
-      }
-
       return new Response('Not Found', { status: 404, headers: corsHeaders() });
     } catch (err) {
       return new Response(JSON.stringify({ error: err.message }), {
@@ -199,23 +186,20 @@ export default {
   }
 };
 
+async function getCurrentUser(request, env) {
+  const sessionId = getSessionId(request);
+  if (!sessionId) return null;
+  const sessionResult = await getSession(env, sessionId);
+  if (!sessionResult) return null;
+  return sessionResult.session.username;
+}
+
 async function handleUpload(request, env) {
   const token = env.GITHUB_TOKEN;
   if (!token) throw new Error('GITHUB_TOKEN not configured');
 
-  const sessionId = getSessionId(request);
-  let currentUser = null;
-  let isSuper = false;
-
-  if (sessionId) {
-    const sessionResult = await getSession(env, sessionId);
-    if (sessionResult) {
-      currentUser = sessionResult.session.username;
-      if (currentUser === CONFIG.SUPER_USER) {
-        isSuper = true;
-      }
-    }
-  }
+  const currentUser = await getCurrentUser(request, env);
+  const isSuper = currentUser === CONFIG.SUPER_USER;
 
   const contentType = request.headers.get('Content-Type') || '';
   let fileData, filename, customSlug, customTtl;
@@ -252,19 +236,19 @@ async function handleUpload(request, env) {
   const fileBuffer = await fileData.arrayBuffer();
   const fileSize = fileBuffer.byteLength;
 
-  if (!isSuper) {
-    if (fileSize > CONFIG.MAX_NORMAL_SIZE) {
-      throw new Error('File too large. Max ' + (CONFIG.MAX_NORMAL_SIZE / 1024 / 1024) + 'MB for normal users');
-    }
+  if (!isSuper && fileSize > CONFIG.MAX_NORMAL_SIZE) {
+    throw new Error('File too large. Max ' + (CONFIG.MAX_NORMAL_SIZE / 1024 / 1024) + 'MB for normal users');
   }
 
-  const meta = await getMeta(token);
-  const totalUsed = calculateTotalSize(meta);
-  if (totalUsed + fileSize > CONFIG.TOTAL_CAPACITY) {
-    await cleanupExpired(token, meta);
-    const newTotal = calculateTotalSize(await getMeta(token));
-    if (newTotal + fileSize > CONFIG.TOTAL_CAPACITY) {
-      throw new Error('Server capacity full');
+  if (!isSuper) {
+    const meta = await getMeta(token);
+    const normalUsed = calculateNormalSize(meta);
+    if (normalUsed + fileSize > CONFIG.TOTAL_CAPACITY) {
+      await cleanupExpired(token, meta);
+      const newUsed = calculateNormalSize(await getMeta(token));
+      if (newUsed + fileSize > CONFIG.TOTAL_CAPACITY) {
+        throw new Error('Server capacity full');
+      }
     }
   }
 
@@ -275,6 +259,7 @@ async function handleUpload(request, env) {
   let fileId;
   if (isSuper && customSlug) {
     fileId = sanitizeSlug(customSlug);
+    const meta = await getMeta(token);
     if (meta[fileId]) {
       throw new Error('Custom slug already exists');
     }
@@ -299,6 +284,7 @@ async function handleUpload(request, env) {
     await uploadToGitHub(token, CONFIG.BASE_PATH + '/' + fileId, fileBuffer);
   }
 
+  const meta = await getMeta(token);
   const fileMeta = {
     id: fileId,
     filename: filename,
@@ -348,6 +334,9 @@ async function handleDownload(request, env) {
   if (!fileMeta) throw new Error('File not found or expired');
 
   if (Date.now() > fileMeta.expiresAt) {
+    await deleteFile(token, fileId, fileMeta);
+    delete meta[fileId];
+    await saveMeta(token, meta);
     throw new Error('File expired');
   }
 
@@ -395,48 +384,6 @@ async function handleDownload(request, env) {
   });
 }
 
-async function handleMerge(request, env) {
-  const token = env.GITHUB_TOKEN;
-  const body = await request.json();
-  const fileId = body.fileId;
-
-  if (!fileId) throw new Error('File ID required');
-
-  const meta = await getMeta(token);
-  const fileMeta = meta[fileId];
-
-  if (!fileMeta || !fileMeta.chunks) {
-    throw new Error('File not found or not chunked');
-  }
-
-  if (Date.now() > fileMeta.expiresAt) {
-    throw new Error('File expired');
-  }
-
-  const chunks = [];
-  for (let i = 0; i < fileMeta.chunks.length; i++) {
-    const data = await downloadFromGitHub(token, CONFIG.BASE_PATH + '/' + fileMeta.chunks[i].id);
-    chunks.push(new Uint8Array(data));
-  }
-
-  const totalSize = chunks.reduce((sum, c) => sum + c.length, 0);
-  const merged = new Uint8Array(totalSize);
-  let offset = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    merged.set(chunks[i], offset);
-    offset += chunks[i].length;
-  }
-
-  return new Response(merged.buffer, {
-    headers: {
-      'Content-Type': fileMeta.mimeType,
-      'Content-Disposition': 'attachment; filename="' + fileMeta.filename + '"',
-      'Content-Length': totalSize,
-      ...corsHeaders()
-    }
-  });
-}
-
 async function handleInfo(request, env) {
   const url = new URL(request.url);
   const fileId = url.searchParams.get('id');
@@ -453,7 +400,7 @@ async function handleInfo(request, env) {
   }
 
   const totalFiles = Object.keys(meta).length;
-  const totalSize = calculateTotalSize(meta);
+  const totalSize = calculateNormalSize(meta);
   const expiredFiles = Object.values(meta).filter(f => f.expiresAt < Date.now()).length;
 
   return new Response(JSON.stringify({
@@ -476,17 +423,8 @@ async function handleDelete(request, env) {
 
   if (!fileId) throw new Error('File ID required');
 
-  const sessionId = getSessionId(request);
-  let currentUser = null;
-  let isSuper = false;
-
-  if (sessionId) {
-    const sessionResult = await getSession(env, sessionId);
-    if (sessionResult) {
-      currentUser = sessionResult.session.username;
-      if (currentUser === CONFIG.SUPER_USER) isSuper = true;
-    }
-  }
+  const currentUser = await getCurrentUser(request, env);
+  const isSuper = currentUser === CONFIG.SUPER_USER;
 
   const meta = await getMeta(token);
   const fileMeta = meta[fileId];
@@ -594,8 +532,11 @@ function sanitizeSlug(slug) {
   return slug.replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 64);
 }
 
-function calculateTotalSize(meta) {
-  return Object.values(meta).reduce((sum, f) => sum + (f.size || 0), 0);
+function calculateNormalSize(meta) {
+  return Object.values(meta).reduce((sum, f) => {
+    if (!f.isSuper) return sum + (f.size || 0);
+    return sum;
+  }, 0);
 }
 
 async function cleanupExpired(token, meta) {
@@ -654,7 +595,7 @@ function getFrontendHTML() {
 '  <style>' +
 '    * { margin: 0; padding: 0; box-sizing: border-box; }' +
 '    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; color: #eee; display: flex; justify-content: center; align-items: center; padding: 20px; }' +
-'    .container { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; max-width: 700px; width: 100%; border: 1px solid rgba(255,255,255,0.1); }' +
+'    .container { background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; max-width: 600px; width: 100%; border: 1px solid rgba(255,255,255,0.1); }' +
 '    h1 { text-align: center; margin-bottom: 10px; font-size: 2em; background: linear-gradient(45deg, #00d4ff, #7b2ff7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }' +
 '    .subtitle { text-align: center; color: #888; margin-bottom: 30px; }' +
 '    .user-info { text-align: center; margin-bottom: 20px; padding: 10px; background: rgba(0,212,255,0.1); border-radius: 10px; display: none; }' +
@@ -667,7 +608,7 @@ function getFrontendHTML() {
 '    .options.active { display: block; }' +
 '    .input-group { margin-bottom: 15px; }' +
 '    .input-group label { display: block; margin-bottom: 5px; color: #aaa; font-size: 0.9em; }' +
-'    .input-group input, .input-group select { width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.2); color: #fff; font-size: 1em; }' +
+'    .input-group input { width: 100%; padding: 12px; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; background: rgba(0,0,0,0.2); color: #fff; font-size: 1em; }' +
 '    .input-group input:focus { outline: none; border-color: #00d4ff; }' +
 '    .btn { width: 100%; padding: 15px; border: none; border-radius: 10px; background: linear-gradient(45deg, #00d4ff, #7b2ff7); color: #fff; font-size: 1.1em; cursor: pointer; transition: transform 0.2s; margin-top: 10px; }' +
 '    .btn:hover { transform: translateY(-2px); }' +
@@ -680,14 +621,6 @@ function getFrontendHTML() {
 '    .progress-bar { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; margin-top: 10px; overflow: hidden; }' +
 '    .progress-fill { height: 100%; background: linear-gradient(45deg, #00d4ff, #7b2ff7); transition: width 0.3s; }' +
 '    .chunk-info { margin-top: 10px; font-size: 0.85em; color: #aaa; }' +
-'    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }' +
-'    .tab { flex: 1; padding: 10px; text-align: center; background: rgba(255,255,255,0.05); border-radius: 8px; cursor: pointer; transition: all 0.3s; }' +
-'    .tab.active { background: rgba(0,212,255,0.2); border: 1px solid rgba(0,212,255,0.3); }' +
-'    .tab-content { display: none; }' +
-'    .tab-content.active { display: block; }' +
-'    .file-list { max-height: 300px; overflow-y: auto; }' +
-'    .file-item { padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }' +
-'    .file-item button { background: rgba(255,0,0,0.2); border: none; color: #ff6b6b; padding: 5px 15px; border-radius: 5px; cursor: pointer; }' +
 '  </style>' +
 '</head>' +
 '<body>' +
@@ -698,48 +631,37 @@ function getFrontendHTML() {
 '      <span id="userName"></span>' +
 '      <span class="super-badge" id="superBadge" style="display:none;">SUPER</span>' +
 '    </div>' +
-'    <div class="tabs">' +
-'      <div class="tab active" onclick="switchTab(event, 'upload')">上传文件</div>' +
-'      <div class="tab" onclick="switchTab(event, 'files')">我的文件</div>' +
+'    <div class="upload-area" id="uploadArea">' +
+'      <span style="font-size: 3em;">&#128193;</span>' +
+'      <p>点击或拖拽文件到此处上传</p>' +
+'      <p style="color: #666; font-size: 0.9em; margin-top: 10px;">普通用户 <=100MB - 10分钟过期</p>' +
+'      <input type="file" class="file-input" id="fileInput">' +
 '    </div>' +
-'    <div class="tab-content active" id="uploadTab">' +
-'      <div class="upload-area" id="uploadArea">' +
-'        <span style="font-size: 3em;">&#128193;</span>' +
-'        <p>点击或拖拽文件到此处上传</p>' +
-'        <p style="color: #666; font-size: 0.9em; margin-top: 10px;">普通用户 <=100MB - 10分钟过期</p>' +
-'        <input type="file" class="file-input" id="fileInput">' +
+'    <div class="options" id="options">' +
+'      <div class="input-group">' +
+'        <label>文件名 <span id="fileName"></span></label>' +
 '      </div>' +
-'      <div class="options" id="options">' +
-'        <div class="input-group">' +
-'          <label>文件名 <span id="fileName"></span></label>' +
-'        </div>' +
-'        <div class="input-group super-only" style="display:none;">' +
-'          <label>自定义链接 <span class="super-badge">SUPER</span></label>' +
-'          <input type="text" id="customSlug" placeholder="my-custom-link">' +
-'        </div>' +
-'        <div class="input-group super-only" style="display:none;">' +
-'          <label>有效期（秒）<span class="super-badge">SUPER</span></label>' +
-'          <input type="number" id="customTtl" placeholder="默认 600 秒">' +
-'        </div>' +
+'      <div class="input-group super-only" style="display:none;">' +
+'        <label>自定义链接 <span class="super-badge">SUPER</span></label>' +
+'        <input type="text" id="customSlug" placeholder="my-custom-link">' +
 '      </div>' +
-'      <button class="btn" id="uploadBtn" disabled>上传文件</button>' +
-'      <div class="progress-bar" id="progressBar" style="display:none;">' +
-'        <div class="progress-fill" id="progressFill" style="width: 0%"></div>' +
-'      </div>' +
-'      <div class="chunk-info" id="chunkInfo"></div>' +
-'      <div class="result" id="result">' +
-'        <h3>上传成功</h3>' +
-'        <p>下载链接（点击复制）：</p>' +
-'        <div class="link-box" id="linkBox"></div>' +
-'        <p id="expireText"></p>' +
-'        <div id="chunkDownload" style="display:none; margin-top: 10px;">' +
-'          <p>此文件已切片</p>' +
-'        </div>' +
+'      <div class="input-group super-only" style="display:none;">' +
+'        <label>有效期（秒）<span class="super-badge">SUPER</span></label>' +
+'        <input type="number" id="customTtl" placeholder="默认 600 秒">' +
 '      </div>' +
 '    </div>' +
-'    <div class="tab-content" id="filesTab">' +
-'      <div class="file-list" id="fileList">' +
-'        <p style="text-align:center;color:#888;">加载中...</p>' +
+'    <button class="btn" id="uploadBtn" disabled>上传文件</button>' +
+'    <div class="progress-bar" id="progressBar" style="display:none;">' +
+'      <div class="progress-fill" id="progressFill" style="width: 0%"></div>' +
+'    </div>' +
+'    <div class="chunk-info" id="chunkInfo"></div>' +
+'    <div class="result" id="result">' +
+'      <h3>上传成功</h3>' +
+'      <p>下载链接（点击复制）：</p>' +
+'      <div class="link-box" id="linkBox"></div>' +
+'      <p id="expireText"></p>' +
+'      <div id="chunkDownload" style="display:none; margin-top: 10px;">' +
+'        <p>此文件已切片，下载所有切片后合并</p>' +
 '      </div>' +
 '    </div>' +
 '    <div class="stats" id="stats">' +
@@ -775,13 +697,6 @@ function getFrontendHTML() {
 '      } catch (e) {}' +
 '    }' +
 '    checkUser();' +
-'    function switchTab(event, tab) {' +
-'      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));' +
-'      document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));' +
-'      event.target.classList.add("active");' +
-'      document.getElementById(tab + "Tab").classList.add("active");' +
-'      if (tab === "files") loadMyFiles();' +
-'    }' +
 '    uploadArea.addEventListener("click", () => fileInput.click());' +
 '    uploadArea.addEventListener("dragover", (e) => { e.preventDefault(); uploadArea.classList.add("dragover"); });' +
 '    uploadArea.addEventListener("dragleave", () => uploadArea.classList.remove("dragover"));' +
@@ -834,14 +749,6 @@ function getFrontendHTML() {
 '      result.innerHTML = "<h3>错误</h3><p>" + msg + "</p>";' +
 '      result.classList.add("active");' +
 '    }' +
-'    async function loadMyFiles() {' +
-'      try {' +
-'        const res = await fetch("/api/file/info", { credentials: "include" });' +
-'        const data = await res.json();' +
-'        const list = document.getElementById("fileList");' +
-'        list.innerHTML = "<p style=text-align:center;color:#888;>功能开发中...</p>";' +
-'      } catch (e) { console.error(e); }' +
-'    }' +
 '    function formatBytes(bytes) {' +
 '      if (bytes === 0) return "0 B";' +
 '      const k = 1024;' +
@@ -858,6 +765,7 @@ function getFrontendHTML() {
 '      } catch (e) {}' +
 '    }' +
 '    loadStats();' +
+'    setInterval(loadStats, 5000);' +
 '  </script>' +
 '</body>' +
 '</html>';
