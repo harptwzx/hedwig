@@ -97,31 +97,47 @@ async function writeGitHubFile(filePath, content, commitMessage, token, existing
 
 async function deleteGitHubFile(filePath, token) {
   const url = 'https://api.github.com/repos/' + CONFIG.OWNER + '/' + CONFIG.REPO + '/contents/' + filePath;
-  try {
-    const checkResponse = await fetch(url, {
-      headers: {
-        'Authorization': 'token ' + token,
-        'User-Agent': 'Hedwig-Worker'
+  let retries = 3;
+  while (retries > 0) {
+    try {
+      const checkResponse = await fetch(url, {
+        headers: {
+          'Authorization': 'token ' + token,
+          'User-Agent': 'Hedwig-Worker'
+        }
+      });
+      if (checkResponse.status === 404) {
+        return true;
       }
-    });
-    if (!checkResponse.ok) return false;
-    const existingData = await checkResponse.json();
-    const response = await fetch(url, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': 'token ' + token,
-        'Content-Type': 'application/json',
-        'User-Agent': 'Hedwig-Worker'
-      },
-      body: JSON.stringify({
-        message: 'Delete: ' + filePath,
-        sha: existingData.sha
-      })
-    });
-    return response.ok;
-  } catch (error) {
-    return false;
+      if (!checkResponse.ok) {
+        const text = await checkResponse.text();
+        throw new Error('Check failed ' + checkResponse.status + ': ' + text.substring(0, 200));
+      }
+      const existingData = await checkResponse.json();
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': 'token ' + token,
+          'Content-Type': 'application/json',
+          'User-Agent': 'Hedwig-Worker'
+        },
+        body: JSON.stringify({
+          message: 'Delete: ' + filePath,
+          sha: existingData.sha
+        })
+      });
+      if (response.ok) return true;
+      if (response.status === 404) return true;
+      if (response.status === 422) return true;
+      const text = await response.text();
+      throw new Error('Delete failed ' + response.status + ': ' + text.substring(0, 200));
+    } catch (error) {
+      retries--;
+      if (retries === 0) throw new Error('deleteGitHubFile failed for ' + filePath + ': ' + error.message);
+      await new Promise(r => setTimeout(r, 1000));
+    }
   }
+  return false;
 }
 
 async function getSession(env, sessionId) {
@@ -506,7 +522,7 @@ async function handleInfo(request, env) {
   const token = env.GITHUB_TOKEN;
 
   let meta = await getMeta(token);
-  await cleanupExpired(token, meta);
+  const cleanupResult = await cleanupExpired(token, meta);
   meta = await getMeta(token);
 
   if (fileId) {
@@ -565,12 +581,13 @@ async function handleDelete(request, env) {
 async function handleCleanup(request, env) {
   const token = env.GITHUB_TOKEN;
   let meta = await getMeta(token);
-  const cleaned = await cleanupExpired(token, meta);
+  const result = await cleanupExpired(token, meta);
 
   return new Response(JSON.stringify({
     success: true,
-    cleaned: cleaned.length,
-    files: cleaned
+    cleaned: result.expired.length,
+    files: result.expired,
+    errors: result.errors
   }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders() }
   });
@@ -663,12 +680,17 @@ function calculateNormalSize(meta) {
 async function cleanupExpired(token, meta) {
   const now = Date.now();
   const expired = [];
+  const errors = [];
 
   for (const id in meta) {
     if (meta[id].expiresAt < now) {
-      await deleteFile(token, id, meta[id]);
-      expired.push(id);
-      delete meta[id];
+      try {
+        await deleteFile(token, id, meta[id]);
+        expired.push(id);
+        delete meta[id];
+      } catch (e) {
+        errors.push(id + ': ' + e.message);
+      }
     }
   }
 
@@ -676,16 +698,28 @@ async function cleanupExpired(token, meta) {
     await saveMeta(token, meta);
   }
 
-  return expired;
+  return { expired: expired, errors: errors };
 }
 
 async function deleteFile(token, fileId, fileMeta) {
-  if (fileMeta.chunks) {
+  const errors = [];
+  if (fileMeta.chunks && fileMeta.chunks.length > 0) {
     for (let i = 0; i < fileMeta.chunks.length; i++) {
-      await deleteGitHubFile(CONFIG.BASE_PATH + '/' + fileMeta.chunks[i].id, token);
+      try {
+        await deleteGitHubFile(CONFIG.BASE_PATH + '/' + fileMeta.chunks[i].id, token);
+      } catch (e) {
+        errors.push('chunk ' + i + ' (' + fileMeta.chunks[i].id + '): ' + e.message);
+      }
     }
   } else {
-    await deleteGitHubFile(CONFIG.BASE_PATH + '/' + fileId, token);
+    try {
+      await deleteGitHubFile(CONFIG.BASE_PATH + '/' + fileId, token);
+    } catch (e) {
+      errors.push('main file: ' + e.message);
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error('Delete errors: ' + errors.join('; '));
   }
 }
 
