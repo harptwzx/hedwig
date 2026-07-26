@@ -10,9 +10,10 @@ export default {
             return hfProxy.fetch(request, env, ctx);
         }
 
-        if (url.pathname.startsWith('/share')) {
-            return fileShare.fetch(request, env, ctx);
-        }
+        if (pathname.startsWith('/api/file/') || pathname === '/f') {
+            return import('./file-share.js').then(m => m.default.fetch(request, env, ctx));
+}
+
 
         return api.fetch(request, env, ctx);
     },
