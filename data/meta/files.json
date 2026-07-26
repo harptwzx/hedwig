@@ -282,6 +282,11 @@
         "index": 2,
         "id": "1c545e1345b59768_part2",
         "size": 716800
+      },
+      {
+        "index": 3,
+        "id": "1c545e1345b59768_part3",
+        "size": 716800
       }
     ],
     "chunkCount": 5,
