@@ -177,6 +177,11 @@
         "index": 30,
         "id": "test1_part30",
         "size": 716800
+      },
+      {
+        "index": 31,
+        "id": "test1_part31",
+        "size": 716800
       }
     ],
     "chunkCount": 46,
