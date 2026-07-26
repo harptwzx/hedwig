@@ -11,5 +11,18 @@
     "chunks": null,
     "chunkCount": 1,
     "downloads": 1
+  },
+  "edbdbfdb86224a4b": {
+    "id": "edbdbfdb86224a4b",
+    "filename": "3dWorld.html",
+    "size": 21087,
+    "mimeType": "text/html",
+    "createdAt": 1785035999342,
+    "expiresAt": 1785036599342,
+    "owner": "hedwig",
+    "isSuper": true,
+    "chunks": null,
+    "chunkCount": 1,
+    "downloads": 0
   }
 }
