@@ -328,6 +328,11 @@
         "index": 1,
         "id": "9bbe9412bec5a524_part1",
         "size": 716800
+      },
+      {
+        "index": 2,
+        "id": "9bbe9412bec5a524_part2",
+        "size": 548196
       }
     ],
     "chunkCount": 3,
