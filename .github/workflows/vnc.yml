@@ -1,0 +1,161 @@
+name: VNC Desktop with Auto Upload
+
+on:
+  workflow_dispatch:
+
+jobs:
+  vnc-desktop:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ========== 1. 安装 Python 3.10 ==========
+      - name: Setup Python 3.10
+        run: |
+          python3 --version
+          python3 -m pip install --upgrade "pip==21.3.1"
+          python3 -m pip --version
+
+      # ========== 2. 安装桌面环境 ==========
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            openbox obconf \
+            lxpanel pcmanfm \
+            xterm \
+            tigervnc-standalone-server \
+            xfonts-base xfonts-75dpi xfonts-100dpi \
+            fontconfig \
+            autocutsel \
+            curl wget \
+            git
+
+      # ========== 3. 配置 Git ==========
+      - name: Configure Git
+        run: |
+          git config --global user.name "harptwzx"
+          git config --global user.email "wzx123_snake@qq.com"
+
+      # ========== 4. 配置 VNC ==========
+      - name: Setup VNC
+        run: |
+          mkdir -p ~/.vnc
+          echo "github" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+          touch ~/.Xauthority
+
+      # ========== 5. 启动 VNC + Openbox ==========
+      - name: Start VNC Server
+        run: |
+          vncserver -kill :1 2>/dev/null || true
+          rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
+          vncserver :1 -geometry 1280x720 -depth 24 -localhost no -xstartup /usr/bin/openbox-session
+          sleep 3
+
+      # ========== 6. 启动桌面组件 ==========
+      - name: Start Desktop
+        run: |
+          DISPLAY=:1 lxpanel &
+          DISPLAY=:1 pcmanfm --desktop &
+          sleep 2
+
+      # ========== 7. 启动 bore.pub 隧道 ==========
+      - name: Expose VNC via bore.pub
+        run: |
+          curl -sL https://api.github.com/repos/ekzhang/bore/releases/latest | \
+            grep "browser_download_url.*x86_64-unknown-linux-musl" | \
+            cut -d '"' -f 4 | wget -i - -O bore.tar.gz
+          tar -xzf bore.tar.gz
+          chmod +x bore
+          
+          nohup ./bore local 5901 --to bore.pub > bore.log 2>&1 &
+          sleep 5
+
+      # ========== 8. 打印 VNC 连接信息 ==========
+      - name: Print VNC info
+        run: |
+          BORE_PORT=$(grep -oP 'listening at bore.pub:\K\d+' bore.log | head -1)
+          
+          echo ""
+          echo "╔════════════════════════════════════════════════════════════╗"
+          echo "║                    🖥️  VNC 连接信息                         ║"
+          echo "╠════════════════════════════════════════════════════════════╣"
+          echo "║  地址: bore.pub:${BORE_PORT}                                 ║"
+          echo "║  密码: github                                              ║"
+          echo "╚════════════════════════════════════════════════════════════╝"
+
+      # ========== 9. 启动 tmate（后台模式）==========
+      - name: Start tmate in background
+        uses: mxschmitt/action-tmate@v3
+        with:
+          detached: true
+          limit-access-to-actor: true
+
+      # ========== 10. 保持运行 + 持续打印连接信息 ==========
+      - name: Keep alive
+        run: |
+          echo "服务运行中..."
+          echo "SSH 链接在上面步骤已打印"
+          echo "输入 exit 断开 SSH 后会自动关闭..."
+          echo ""
+          
+          for i in $(seq 1 1800); do
+            BORE_PORT=$(grep -oP 'listening at bore.pub:\K\d+' bore.log 2>/dev/null | head -1)
+            
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "⏱️  运行时间: ${i}0 秒"
+            echo ""
+            echo "🖥️  VNC 桌面"
+            if [ -n "$BORE_PORT" ]; then
+              echo "   地址: bore.pub:${BORE_PORT}"
+              echo "   密码: github"
+            else
+              echo "   启动中..."
+            fi
+            echo ""
+            echo "🔑 SSH 终端: 查看 Start tmate in background 步骤日志"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            sleep 10
+          done
+
+      # ========== 11. 用户 exit 后上传新文件到 Git ==========
+      - name: Upload new files to Git
+        if: always()
+        run: |
+          echo "正在检测并上传用户添加的文件..."
+          
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          
+          # 设置带 token 的远程 URL
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "检测到新的文件或修改，开始上传..."
+            
+            git add -A
+            git commit -m "auto: upload files from GitHub Actions VNC session ($(date '+%Y-%m-%d %H:%M:%S'))"
+            git push origin "$BRANCH"
+            
+            echo "✅ 文件已成功上传到 GitHub"
+          else
+            echo "没有检测到新文件或修改，无需上传"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ========== 12. 清理并关闭 ==========
+      - name: Cleanup and shutdown
+        if: always()
+        run: |
+          echo "正在清理..."
+          vncserver -kill :1 2>/dev/null || true
+          killall bore 2>/dev/null || true
