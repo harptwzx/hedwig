@@ -11,5 +11,19 @@
     "chunks": null,
     "chunkCount": 1,
     "downloads": 0
+  },
+  "a05d84ad48a52b7b": {
+    "id": "a05d84ad48a52b7b",
+    "filename": "chat.py",
+    "size": 30442,
+    "mimeType": "application/octet-stream",
+    "createdAt": 1785044415602,
+    "expiresAt": 1785045015602,
+    "owner": "hedwig",
+    "isSuper": true,
+    "chunks": null,
+    "chunkCount": 1,
+    "downloads": 0,
+    "finalized": true
   }
 }
