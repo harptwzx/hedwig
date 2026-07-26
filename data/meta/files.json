@@ -1,0 +1,15 @@
+{
+  "k3test": {
+    "id": "k3test",
+    "filename": "ic_launcher5.png",
+    "size": 20524,
+    "mimeType": "image/png",
+    "createdAt": 1785031440245,
+    "expiresAt": 1785032040245,
+    "owner": "hedwig",
+    "isSuper": true,
+    "chunks": null,
+    "chunkCount": 1,
+    "downloads": 0
+  }
+}
