@@ -442,9 +442,13 @@ async function handleDownload(request, env) {
   if (!fileMeta) throw new Error('File not found or expired');
 
   if (Date.now() > fileMeta.expiresAt) {
-    await deleteFile(token, fileId, fileMeta);
     delete meta[fileId];
     await saveMeta(token, meta);
+    try {
+      await deleteFile(token, fileId, fileMeta);
+    } catch (e) {
+      console.error('Delete failed for expired file ' + fileId + ': ' + e.message);
+    }
     throw new Error('File expired');
   }
 
@@ -569,9 +573,13 @@ async function handleDelete(request, env) {
     throw new Error('Forbidden');
   }
 
-  await deleteFile(token, fileId, fileMeta);
   delete meta[fileId];
   await saveMeta(token, meta);
+  try {
+    await deleteFile(token, fileId, fileMeta);
+  } catch (e) {
+    console.error('Delete failed for ' + fileId + ': ' + e.message);
+  }
 
   return new Response(JSON.stringify({ success: true, message: 'File deleted' }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders() }
@@ -684,18 +692,20 @@ async function cleanupExpired(token, meta) {
 
   for (const id in meta) {
     if (meta[id].expiresAt < now) {
+      const fileMeta = meta[id];
+      delete meta[id];
       try {
-        await deleteFile(token, id, meta[id]);
-        expired.push(id);
-        delete meta[id];
+        await saveMeta(token, meta);
       } catch (e) {
-        errors.push(id + ': ' + e.message);
+        errors.push(id + ' meta save: ' + e.message);
       }
+      try {
+        await deleteFile(token, id, fileMeta);
+      } catch (e) {
+        errors.push(id + ' file delete: ' + e.message);
+      }
+      expired.push(id);
     }
-  }
-
-  if (expired.length > 0) {
-    await saveMeta(token, meta);
   }
 
   return { expired: expired, errors: errors };
