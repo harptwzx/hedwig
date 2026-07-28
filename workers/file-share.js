@@ -214,7 +214,7 @@ export default {
 
       return new Response('Not Found', { status: 404, headers: corsHeaders() });
     } catch (err) {
-      return new Response(JSON.stringify({ error: err.message }), {
+      return new Response(JSON.stringify({ error: 'Error' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json', ...corsHeaders() }
       });
@@ -446,9 +446,7 @@ async function handleDownload(request, env) {
     await saveMeta(token, meta);
     try {
       await deleteFile(token, fileId, fileMeta);
-    } catch (e) {
-      console.error('Delete failed for expired file ' + fileId + ': ' + e.message);
-    }
+    } catch (e) {}
     throw new Error('File expired');
   }
 
@@ -577,9 +575,7 @@ async function handleDelete(request, env) {
   await saveMeta(token, meta);
   try {
     await deleteFile(token, fileId, fileMeta);
-  } catch (e) {
-    console.error('Delete failed for ' + fileId + ': ' + e.message);
-  }
+  } catch (e) {}
 
   return new Response(JSON.stringify({ success: true, message: 'File deleted' }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders() }
@@ -594,8 +590,7 @@ async function handleCleanup(request, env) {
   return new Response(JSON.stringify({
     success: true,
     cleaned: result.expired.length,
-    files: result.expired,
-    errors: result.errors
+    files: result.expired
   }), {
     headers: { 'Content-Type': 'application/json', ...corsHeaders() }
   });
@@ -688,48 +683,31 @@ function calculateNormalSize(meta) {
 async function cleanupExpired(token, meta) {
   const now = Date.now();
   const expired = [];
-  const errors = [];
-
   for (const id in meta) {
     if (meta[id].expiresAt < now) {
       const fileMeta = meta[id];
       delete meta[id];
       try {
         await saveMeta(token, meta);
-      } catch (e) {
-        errors.push(id + ' meta save: ' + e.message);
-      }
+      } catch (e) {}
       try {
         await deleteFile(token, id, fileMeta);
-      } catch (e) {
-        errors.push(id + ' file delete: ' + e.message);
-      }
+      } catch (e) {}
       expired.push(id);
     }
   }
-
-  return { expired: expired, errors: errors };
+  return { expired: expired };
 }
 
 async function deleteFile(token, fileId, fileMeta) {
-  const errors = [];
-  if (fileMeta.chunks && fileMeta.chunks.length > 0) {
-    for (let i = 0; i < fileMeta.chunks.length; i++) {
-      try {
-        await deleteGitHubFile(CONFIG.BASE_PATH + '/' + fileMeta.chunks[i].id, token);
-      } catch (e) {
-        errors.push('chunk ' + i + ' (' + fileMeta.chunks[i].id + '): ' + e.message);
-      }
-    }
-  } else {
+  try {
+    await deleteGitHubFile(CONFIG.BASE_PATH + '/' + fileId, token);
+  } catch (e) {}
+  const count = fileMeta.chunkCount || 1;
+  for (let i = 0; i < count; i++) {
     try {
-      await deleteGitHubFile(CONFIG.BASE_PATH + '/' + fileId, token);
-    } catch (e) {
-      errors.push('main file: ' + e.message);
-    }
-  }
-  if (errors.length > 0) {
-    throw new Error('Delete errors: ' + errors.join('; '));
+      await deleteGitHubFile(CONFIG.BASE_PATH + '/' + fileId + '_part' + i, token);
+    } catch (e) {}
   }
 }
 
