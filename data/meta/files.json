@@ -388,30 +388,5 @@
     "chunkCount": 2,
     "downloads": 3,
     "finalized": true
-  },
-  "epub2": {
-    "id": "epub2",
-    "filename": "6 J.K. Rowling - Harry Potter and the Half-Blood Prince - 2005.epub",
-    "size": 1001838,
-    "mimeType": "application/epub+zip",
-    "createdAt": 1785216480057,
-    "expiresAt": 1785216576199,
-    "owner": "hedwig",
-    "isSuper": true,
-    "chunks": [
-      {
-        "index": 0,
-        "id": "epub2_part0",
-        "size": 716800
-      },
-      {
-        "index": 1,
-        "id": "epub2_part1",
-        "size": 285038
-      }
-    ],
-    "chunkCount": 2,
-    "downloads": 1,
-    "finalized": true
   }
 }
