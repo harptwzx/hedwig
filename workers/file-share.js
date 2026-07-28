@@ -351,7 +351,7 @@ async function handleUploadChunk(request, env) {
   const fileSize = json.fileSize;
   const isSuper = json.isSuper;
   const owner = json.owner;
-  const expiresAt = json.expiresAt;
+  const expiresAt = new Date(json.expiresAt).getTime();
   const mimeType = json.mimeType || 'application/octet-stream';
 
   if (!fileId || chunkIndex === undefined || !data) {
