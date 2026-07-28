@@ -403,6 +403,11 @@
         "index": 0,
         "id": "epub2_part0",
         "size": 716800
+      },
+      {
+        "index": 1,
+        "id": "epub2_part1",
+        "size": 285038
       }
     ],
     "chunkCount": 2,
