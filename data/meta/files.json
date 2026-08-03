@@ -1,1 +1,22 @@
-{}
+{
+  "ce3eb712fb86b13e": {
+    "id": "ce3eb712fb86b13e",
+    "filename": "app-debug.apk",
+    "size": 2669678,
+    "mimeType": "application/vnd.android.package-archive",
+    "createdAt": 1785732298457,
+    "expiresAt": 1785732862418,
+    "owner": "anonymous",
+    "isSuper": false,
+    "chunks": [
+      {
+        "index": 0,
+        "id": "ce3eb712fb86b13e_part0",
+        "size": 716800
+      }
+    ],
+    "chunkCount": 4,
+    "downloads": 0,
+    "finalized": false
+  }
+}
