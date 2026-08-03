@@ -18,6 +18,11 @@
         "index": 1,
         "id": "ce3eb712fb86b13e_part1",
         "size": 716800
+      },
+      {
+        "index": 2,
+        "id": "ce3eb712fb86b13e_part2",
+        "size": 716800
       }
     ],
     "chunkCount": 4,
