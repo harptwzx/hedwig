@@ -1,1 +1,16 @@
-{}
+{
+  "9b957f1063bf4f6a": {
+    "id": "9b957f1063bf4f6a",
+    "filename": "test.txt",
+    "size": 30,
+    "mimeType": "text/plain",
+    "createdAt": 1785734038835,
+    "expiresAt": 1785734638835,
+    "owner": "anonymous",
+    "isSuper": false,
+    "chunks": null,
+    "chunkCount": 1,
+    "downloads": 0,
+    "finalized": true
+  }
+}
