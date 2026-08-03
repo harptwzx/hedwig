@@ -12,5 +12,19 @@
     "chunkCount": 1,
     "downloads": 0,
     "finalized": true
+  },
+  "385387882dd478fc": {
+    "id": "385387882dd478fc",
+    "filename": "ModelViewer3D.zip",
+    "size": 391408,
+    "mimeType": "application/octet-stream",
+    "createdAt": 1785734066834,
+    "expiresAt": 1785734666834,
+    "owner": "anonymous",
+    "isSuper": false,
+    "chunks": null,
+    "chunkCount": 1,
+    "downloads": 0,
+    "finalized": true
   }
 }
