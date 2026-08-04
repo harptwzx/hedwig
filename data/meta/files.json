@@ -1,18 +1,4 @@
 {
-  "100kb-test": {
-    "id": "100kb-test",
-    "filename": "test_100kb.bin",
-    "size": 102400,
-    "mimeType": "application/octet-stream",
-    "createdAt": 1785813124877,
-    "expiresAt": 1785813724877,
-    "owner": "hedwig",
-    "isSuper": true,
-    "chunks": null,
-    "chunkCount": 1,
-    "downloads": 0,
-    "finalized": true
-  },
   "500kb-test": {
     "id": "500kb-test",
     "filename": "test_500kb.bin",
