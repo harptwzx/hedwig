@@ -92,5 +92,19 @@
     "chunkCount": 1,
     "downloads": 0,
     "finalized": true
+  },
+  "500kb-test": {
+    "id": "500kb-test",
+    "filename": "test_500kb.bin",
+    "size": 512000,
+    "mimeType": "application/octet-stream",
+    "createdAt": 1785813163297,
+    "expiresAt": 1785813763297,
+    "owner": "hedwig",
+    "isSuper": true,
+    "chunks": null,
+    "chunkCount": 1,
+    "downloads": 0,
+    "finalized": true
   }
 }
