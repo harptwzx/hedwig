@@ -1,18 +1,4 @@
 {
-  "9865d6d62d289141": {
-    "id": "9865d6d62d289141",
-    "filename": "test_upload.txt",
-    "size": 77,
-    "mimeType": "text/plain",
-    "createdAt": 1785802453036,
-    "expiresAt": 1785803053036,
-    "owner": "anonymous",
-    "isSuper": false,
-    "chunks": null,
-    "chunkCount": 1,
-    "downloads": 0,
-    "finalized": true
-  },
   "hedwig-super-5mb-test": {
     "id": "hedwig-super-5mb-test",
     "filename": "test_5mb.bin",
