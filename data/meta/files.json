@@ -32,6 +32,11 @@
         "index": 1,
         "id": "hedwig-super-5mb-test_part1",
         "size": 716800
+      },
+      {
+        "index": 2,
+        "id": "hedwig-super-5mb-test_part2",
+        "size": 716800
       }
     ],
     "chunkCount": 8,
