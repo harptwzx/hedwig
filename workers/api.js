@@ -292,6 +292,17 @@ export default {
                 if (res) return res;
             }
 
+// TSCN 场景查看器路由
+           if (path === '/tscn' || path === '/tscn/' || path.startsWith('/tscn/')) {
+               let tscnPath = path;
+               if (path === '/tscn' || path === '/tscn/') {
+                   tscnPath = '/tscn/index.html';
+               }
+               const res = await serveStaticFile(tscnPath);
+               if (res) return res;
+               return new Response('TSCN Not Found', { status: 404 });
+           }
+
             if (path.startsWith('/games/')) {
                 const res = await serveStaticFile(path);
                 if (res) return res;
