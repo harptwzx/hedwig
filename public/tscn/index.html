@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TSCN 3D 场景查看器 - Hedwig</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            background: #0d1117;
+            overflow: hidden;
+            font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
+            touch-action: none;
+            -webkit-user-select: none; user-select: none;
+        }
+        #viewCanvas {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            background: #000;
+        }
+        #hud {
+            position: absolute; top: 0; left: 0; right: 0;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 14px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #hud .info {
+            color: #c9d1d9; font-size: 13px;
+            background: rgba(13,17,23,.65);
+            padding: 6px 12px; border-radius: 8px;
+            backdrop-filter: blur(4px);
+        }
+        #hud .info a { color: #58a6ff; text-decoration: none; }
+        #status { color: #8b949e; }
+        #status.connected { color: #3fb950; }
+        #status.error { color: #f85149; }
+
+        /* 虚拟操纵杆 */
+        #joystickZone {
+            position: absolute;
+            left: 24px; bottom: 24px;
+            width: 150px; height: 150px;
+            z-index: 20;
+        }
+        #joyBase {
+            position: absolute; inset: 0;
+            border-radius: 50%;
+            background: rgba(255,255,255,.06);
+            border: 2px solid rgba(255,255,255,.18);
+        }
+        #joyKnob {
+            position: absolute;
+            width: 62px; height: 62px;
+            left: 44px; top: 44px;
+            border-radius: 50%;
+            background: rgba(88,166,255,.35);
+            border: 2px solid rgba(88,166,255,.7);
+            box-shadow: 0 0 12px rgba(88,166,255,.35);
+        }
+        #hint {
+            position: absolute; right: 16px; bottom: 20px;
+            color: #6e7681; font-size: 12px; text-align: right;
+            z-index: 10; pointer-events: none; line-height: 1.8;
+        }
+        #cover {
+            position: absolute; inset: 0;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: rgba(13,17,23,.92);
+            z-index: 50; color: #c9d1d9;
+            gap: 14px; text-align: center; padding: 20px;
+        }
+        #cover h1 { font-size: 22px; }
+        #cover p { color: #8b949e; font-size: 14px; max-width: 420px; line-height: 1.8; }
+        #connectBtn {
+            background: #238636; color: #fff; border: none;
+            padding: 12px 36px; font-size: 16px; border-radius: 8px;
+            cursor: pointer;
+        }
+        #connectBtn:disabled { background: #30363d; cursor: default; }
+        #serverInput {
+            background: #161b22; border: 1px solid #30363d; color: #c9d1d9;
+            padding: 10px 12px; border-radius: 8px; width: min(90vw, 380px);
+            font-size: 14px; text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="viewCanvas"></canvas>
+
+    <div id="hud">
+        <div class="info">
+            <a href="/">← Hedwig</a>
+        </div>
+        <div class="info">
+            <span id="status">未连接</span>
+            <span id="fps" style="margin-left:10px;"></span>
+        </div>
+    </div>
+
+    <div id="joystickZone">
+        <div id="joyBase"></div>
+        <div id="joyKnob"></div>
+    </div>
+
+    <div id="hint">
+        触屏：左下操纵杆移动<br>
+        键盘：WASD / 方向键移动
+    </div>
+
+    <div id="cover">
+        <h1>TSCN 3D 场景查看器</h1>
+        <p>所有 3D 计算在服务器完成，此处仅显示画面并回传移动指令。</p>
+        <input id="serverInput" type="text" style="display:none;">
+        <button id="connectBtn">连接服务器</button>
+        <button id="connectBtn">连接服务器</button>
+    </div>
+
+    <script>
+    (function () {
+        var canvas = document.getElementById('viewCanvas');
+        var ctx = canvas.getContext('2d');
+        var statusEl = document.getElementById('status');
+        var fpsEl = document.getElementById('fps');
+        var cover = document.getElementById('cover');
+        var connectBtn = document.getElementById('connectBtn');
+        var serverInput = document.getElementById('serverInput');
+
+        var ws = null;
+        var img = new Image();
+        var pendingFrame = false;
+        var frameCount = 0, lastFpsTime = Date.now();
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function setStatus(text, cls) {
+            statusEl.textContent = text;
+            statusEl.className = cls || '';
+        }
+
+        // ========== 绘制一帧 ==========
+        img.onload = function () {
+            pendingFrame = false;
+            // 等比缩放铺满
+            var cw = canvas.width, ch = canvas.height;
+            var iw = img.width, ih = img.height;
+            var scale = Math.min(cw / iw, ch / ih);
+            var w = iw * scale, h = ih * scale;
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, cw, ch);
+            ctx.drawImage(img, (cw - w) / 2, (ch - h) / 2, w, h);
+            frameCount++;
+            var now = Date.now();
+            if (now - lastFpsTime >= 1000) {
+                fpsEl.textContent = frameCount + ' fps';
+                frameCount = 0;
+                lastFpsTime = now;
+            }
+        };
+
+        // ========== WebSocket ==========
+        function connect() {
+            // 默认连接本站同源 WebSocket（Durable Object 会话）
+            var url = serverInput.value.trim() ||
+                (location.origin.replace(/^http/, 'ws') + '/tscn/ws');
+            connectBtn.disabled = true;
+            connectBtn.textContent = '连接中...';
+            setStatus('连接中...', '');
+            try { ws = new WebSocket(url); } catch (e) {
+                setStatus('地址无效', 'error');
+                connectBtn.disabled = false;
+                connectBtn.textContent = '连接服务器';
+                return;
+            }
+            ws.binaryType = 'blob';
+
+            ws.onopen = function () {
+                cover.style.display = 'none';
+                setStatus('已连接', 'connected');
+            };
+            ws.onmessage = function (ev) {
+                if (typeof ev.data === 'string') {
+                    // 服务器文本消息（可扩展，如玩家状态）
+                    return;
+                }
+                if (!pendingFrame) {
+                    pendingFrame = true;
+                    var reader = new FileReader();
+                    reader.onload = function () {
+                        img.src = reader.result;
+                    };
+                    reader.readAsDataURL(ev.data);
+                }
+            };
+            ws.onclose = function () {
+                setStatus('已断开', 'error');
+                cover.style.display = 'flex';
+                connectBtn.disabled = false;
+                connectBtn.textContent = '重新连接';
+            };
+            ws.onerror = function () {
+                setStatus('连接错误', 'error');
+                cover.style.display = 'flex';
+                connectBtn.disabled = false;
+                connectBtn.textContent = '重新连接';
+            };
+        }
+        connectBtn.addEventListener('click', connect);
+
+        // ========== 移动输入 ==========
+        var input = { x: 0, y: 0 };
+        var lastSent = { x: 0, y: 0 };
+        var keys = {};
+
+        function sendInput() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) return;
+            var ix = input.x + ((keys['KeyD'] || keys['ArrowRight']) ? 1 : 0) - ((keys['KeyA'] || keys['ArrowLeft']) ? 1 : 0);
+            var iy = input.y + ((keys['KeyS'] || keys['ArrowDown']) ? 1 : 0) - ((keys['KeyW'] || keys['ArrowUp']) ? 1 : 0);
+            var len = Math.hypot(ix, iy);
+            if (len > 1) { ix /= len; iy /= len; }
+            if (Math.abs(ix - lastSent.x) > 0.02 || Math.abs(iy - lastSent.y) > 0.02 || (ix === 0 && iy === 0 && (lastSent.x !== 0 || lastSent.y !== 0))) {
+                lastSent = { x: ix, y: iy };
+                ws.send(JSON.stringify({ type: 'input', x: ix, y: iy }));
+            }
+        }
+        setInterval(sendInput, 50);
+
+        // 键盘
+        document.addEventListener('keydown', function (e) { keys[e.code] = true; });
+        document.addEventListener('keyup', function (e) { keys[e.code] = false; });
+
+        // 虚拟操纵杆
+        var zone = document.getElementById('joystickZone');
+        var base = document.getElementById('joyBase');
+        var knob = document.getElementById('joyKnob');
+        var joyActive = false, joyId = null;
+        var RADIUS = 75, KNOB_R = 31;
+
+        function joyMove(touch) {
+            var rect = base.getBoundingClientRect();
+            var cx = rect.left + rect.width / 2;
+            var cy = rect.top + rect.height / 2;
+            var dx = touch.clientX - cx;
+            var dy = touch.clientY - cy;
+            var dist = Math.hypot(dx, dy);
+            if (dist > RADIUS - KNOB_R) {
+                dx = dx / dist * (RADIUS - KNOB_R);
+                dy = dy / dist * (RADIUS - KNOB_R);
+            }
+            knob.style.left = (44 + dx) + 'px';
+            knob.style.top = (44 + dy) + 'px';
+            input.x = dx / (RADIUS - KNOB_R);
+            input.y = dy / (RADIUS - KNOB_R);
+        }
+        function joyReset() {
+            joyActive = false; joyId = null;
+            knob.style.left = '44px';
+            knob.style.top = '44px';
+            input.x = 0; input.y = 0;
+        }
+        zone.addEventListener('touchstart', function (e) {
+            e.preventDefault();
+            joyActive = true;
+            joyId = e.changedTouches[0].identifier;
+            joyMove(e.changedTouches[0]);
+        }, { passive: false });
+        zone.addEventListener('touchmove', function (e) {
+            e.preventDefault();
+            for (var i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === joyId) joyMove(e.changedTouches[i]);
+            }
+        }, { passive: false });
+        zone.addEventListener('touchend', function (e) {
+            for (var i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === joyId) joyReset();
+            }
+        });
+        zone.addEventListener('touchcancel', joyReset);
+
+        // 桌面调试用鼠标拖动
+        zone.addEventListener('mousedown', function (e) { joyActive = true; joyMove(e); });
+        document.addEventListener('mousemove', function (e) { if (joyActive && e.buttons) joyMove(e); });
+        document.addEventListener('mouseup', function () { if (joyActive) joyReset(); });
+    })();
+    </script>
+</body>
+</html>

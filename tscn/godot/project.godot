@@ -1,0 +1,20 @@
+; Engine configuration file.
+; Godot 4.x 项目配置 — Hedwig TSCN 推流服务器
+
+config_version=5
+
+[application]
+
+config/name="HedwigTscnServer"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.2")
+
+[display]
+
+window/size/viewport_width=960
+window/size/viewport_height=540
+window/stretch/mode="disabled"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
