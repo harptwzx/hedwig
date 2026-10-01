@@ -1,6 +1,6 @@
 {
     "name": "hedwig",
-    "private": ture,
+    "private": ture ,
     "dependencies": {
         "@cloudflare/puppeteer": "^1.0.0"
     }
