@@ -1,7 +1,10 @@
 name = "hedwig"
 main = "workers/index.js"
-compatibility_date = "2025-01-01"
+compatibility_date = "2024-06-14"
 compatibility_flags = ["nodejs_compat"]
+
+[browser]
+binding = "BROWSER"
 
 [[durable_objects.bindings]]
 name = "TSCN_SESSION"
@@ -11,5 +14,17 @@ class_name = "TscnSession"
 tag = "v1"
 new_sqlite_classes = ["TscnSession"]
 
-[browser]
-binding = "BROWSER"
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1
