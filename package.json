@@ -1,2 +1,7 @@
-npm init -y
-npm install @cloudflare/puppeteer
+{
+    "name": "hedwig",
+    "private": ture,
+    "dependencies": {
+        "@cloudflare/puppeteer": "^1.0.0"
+    }
+}
