@@ -14,7 +14,7 @@ class_name = "TscnSession"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["TscnSession"]
+new_sqlite_classes = ["TscnSession"]
 
 [observability]
 enabled = false
