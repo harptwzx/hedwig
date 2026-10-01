@@ -1,13 +1,8 @@
 name = "hedwig"
 main = "workers/index.js"
-compatibility_date = "2024-06-14"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
 
-# Browser Rendering 绑定：用于在 Cloudflare 机房的无头 Chromium 中渲染 3D 场景
-# 免费计划：每天 10 分钟浏览器时间 / 3 个并发浏览器
-[browser]
-binding = "BROWSER"
-
-# TSCN 会话 Durable Object：每个实例持有一个浏览器会话，供所有查看器共享
 [[durable_objects.bindings]]
 name = "TSCN_SESSION"
 class_name = "TscnSession"
@@ -16,17 +11,5 @@ class_name = "TscnSession"
 tag = "v1"
 new_sqlite_classes = ["TscnSession"]
 
-[observability]
-enabled = false
-head_sampling_rate = 1
-
-[observability.logs]
-enabled = true
-head_sampling_rate = 1
-persist = true
-invocation_logs = true
-
-[observability.traces]
-enabled = false
-persist = true
-head_sampling_rate = 1
+[browser]
+binding = "BROWSER"
