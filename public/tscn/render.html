@@ -11,31 +11,25 @@
 <body>
     <canvas id="scene"></canvas>
     <script type="module">
-    // ============================================================
-    // TSCN 渲染页 —— 运行在 Cloudflare 无头 Chromium 中（服务器端）
-    // Durable Object 通过 CDP 调用：
-    //   window.__setInput(x, y)  —— 设置移动输入（-1..1）
-    //   window.__ready           —— 场景加载完成后置 true
-    // ============================================================
     import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 
     const TSCN_URL = 'https://raw.githubusercontent.com/harptwzx/hedwig/main/tscn/godot/main.tscn';
     const MOVE_SPEED = 5.0;
 
     const canvas = document.getElementById('scene');
-    const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setSize(960, 540, false);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87a8cc);
     scene.fog = new THREE.Fog(0x87a8cc, 30, 90);
-
-    // 光照（tscn 里的灯解析后追加）
     scene.add(new THREE.HemisphereLight(0xdfeaff, 0x334455, 0.9));
 
     const camera = new THREE.PerspectiveCamera(60, 960 / 540, 0.1, 200);
+    const camOffset = new THREE.Vector3(0, 6, 9);
 
-    // ========== 输入状态（由 __setInput 写入） ==========
     let input = { x: 0, y: 0 };
     window.__setInput = function (x, y) {
         input.x = Math.max(-1, Math.min(1, x || 0));
@@ -43,19 +37,16 @@
     };
     window.__ready = false;
 
-    // ========== 角色与相机跟随 ==========
-    let player = null;       // THREE.Group
-    const camOffset = new THREE.Vector3(0, 6, 9);
+    let player = null;
 
-    // ========== tscn 解析（支持常用节点子集） ==========
+    // ========== tscn 解析器 ==========
     function parseVec(text) {
-        const nums = (text.match(/-?\d+\.?\d*(e-?\d+)?/gi) || []).map(Number);
-        return nums;
+        return (text.match(/-?\d+\.?\d*(e-?\d+)?/gi) || []).map(Number);
     }
 
     function parseTscn(text) {
-        const subResources = {};   // id -> {type, props}
-        const nodes = [];          // {name, type, parent, props}
+        const subResources = {};
+        const nodes = [];
         let cur = null;
         for (const raw of text.split('\n')) {
             const line = raw.trim();
@@ -87,7 +78,6 @@
         return { subResources, nodes };
     }
 
-    // Transform3D(a,b,c, d,e,f, g,h,i, ox,oy,oz)：前 9 个数是三列基向量，后 3 个是原点
     function applyTransform(obj, transformLine) {
         const n = parseVec(transformLine);
         if (n.length < 12) return;
@@ -108,7 +98,7 @@
             const n = parseVec(colorText);
             if (n.length >= 3) color = new THREE.Color(n[0], n[1], n[2]).getHex();
         }
-        return new THREE.MeshStandardMaterial({ color: color, roughness: 0.85, metalness: 0.05 });
+        return new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05 });
     }
 
     function meshGeometryFromSub(sub) {
@@ -118,7 +108,7 @@
             case 'PlaneMesh': {
                 const n = parseVec(p['size'] || '1, 1');
                 const g = new THREE.PlaneGeometry(n[0] || 1, n[1] || 1);
-                g.rotateX(-Math.PI / 2);   // Godot 平面朝 +Y
+                g.rotateX(-Math.PI / 2);
                 return g;
             }
             case 'BoxMesh': {
@@ -140,12 +130,10 @@
                 const h = parseVec(p['height'] || '2')[0] || 2;
                 return new THREE.CylinderGeometry(t, b, h, 24);
             }
-            default:
-                return null;
+            default: return null;
         }
     }
 
-    // 返回 { root, player }：root 为场景根，player 为可移动角色（tscn 中名为 Player 的 CharacterBody3D）
     function buildScene(parsed) {
         const root = new THREE.Group();
         const byPath = { '.': root };
@@ -184,7 +172,6 @@
                     const target = new THREE.Object3D();
                     obj.add(light); obj.add(target);
                     light.target = target;
-                    // 方向光从灯的 -Z 方向照出
                     light.position.set(0, 0, 0);
                     target.position.set(0, 0, -10);
                     light.castShadow = true;
@@ -203,17 +190,13 @@
                     obj.add(light);
                     break;
                 }
-                case 'Camera3D':
-                    // 忽略 tscn 相机，统一用跟随相机
-                    break;
-                default:
-                    break;
+                case 'Camera3D': break;
+                default: break;
             }
         }
         return { root, player: playerObj };
     }
 
-    // ========== 加载场景 ==========
     async function loadScene() {
         let parsed = null;
         try {
@@ -228,7 +211,6 @@
             player = built.player;
         }
 
-        // 没有任何可用内容时：内置「3D 平地」演示
         if (!root || root.children.length === 0) {
             root = new THREE.Group();
             const ground = new THREE.Mesh(
@@ -242,7 +224,6 @@
             root.add(grid);
         }
 
-        // Player 不存在时补一个胶囊角色
         if (!player) {
             player = new THREE.Group();
             player.name = 'Player';
@@ -257,18 +238,13 @@
             root.add(player);
         }
 
-        // 给角色补影子
         player.traverse(function (o) { o.castShadow = true; });
 
         scene.add(root);
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
         camera.position.copy(player.position).add(camOffset);
         camera.lookAt(player.position);
     }
 
-    // ========== 主循环：移动 + 相机跟随（全部在这里模拟） ==========
     let lastTime = performance.now();
     function tick() {
         const now = performance.now();
@@ -278,7 +254,6 @@
         if (player) {
             const len = Math.hypot(input.x, input.y);
             if (len > 0.05) {
-                // 相机参考系移动；y 为前后（摇杆上推为负）
                 const dir = new THREE.Vector3(input.x, 0, input.y);
                 if (len > 1) dir.divideScalar(len);
                 player.position.addScaledVector(dir, MOVE_SPEED * dt);
@@ -300,7 +275,6 @@
         window.__ready = true;
         requestAnimationFrame(tick);
     }).catch(function (e) {
-        // 场景加载异常也要 ready，保证 DO 不卡住（显示空地）
         window.__ready = true;
         requestAnimationFrame(tick);
     });
