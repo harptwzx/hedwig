@@ -6,7 +6,8 @@ import puppeteer from '@cloudflare/puppeteer';
 const RENDER_URL = 'https://hedwig.eu.org/tscn/render.html';
 const FRAME_FPS = 10;
 const JPEG_QUALITY = 70;
-const IDLE_SHUTDOWN_MS = 30 * 1000;
+const IDLE_SHUTDOWN_MS = 5 * 60 * 1000;  // 5分钟无观众才关闭（减少频繁启停）
+const RESTART_COOLDOWN_MS = 5 * 60 * 1000; // 启动失败后5分钟内不再尝试
 const VIEWPORT = { width: 960, height: 540 };
 
 function toBase64(buffer) {
@@ -29,6 +30,7 @@ export class TscnSession {
     this.frameTimer = null;
     this.idleTimer = null;
     this.starting = null;
+    this.lastStartAttempt = 0;  // 上次尝试启动的时间戳
   }
 
   async fetch(request) {
@@ -48,21 +50,49 @@ export class TscnSession {
       this.resetIdleTimer();
     });
 
-    // 启动浏览器（并发去重：只允许一个启动过程）
-    if (!this.page && !this.starting) {
-      this.starting = this.startBrowser().catch((err) => {
-        const msg = (err && err.message) || String(err);
-        console.error('TscnSession: browser start failed:', msg);
-        for (const ws of this.viewers) {
-          try {
-            ws.send(JSON.stringify({ type: 'error', message: '浏览器启动失败：' + msg }));
-          } catch (e) {}
-        }
-        this.starting = null;
-      });
-    }
+    // 启动浏览器（带冷却时间防止429）
+    await this.ensureBrowser();
 
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  async ensureBrowser() {
+    const now = Date.now();
+    
+    // 如果正在启动或已经有浏览器，直接返回
+    if (this.starting || this.page) return;
+    
+    // 检查冷却时间：上次启动失败不到5分钟，不再尝试
+    if (now - this.lastStartAttempt < RESTART_COOLDOWN_MS) {
+      const waitSec = Math.ceil((RESTART_COOLDOWN_MS - (now - this.lastStartAttempt)) / 1000);
+      this.broadcastError(`浏览器启动冷却中，请 ${waitSec} 秒后再试`);
+      return;
+    }
+
+    this.lastStartAttempt = now;
+    this.starting = this.startBrowser()
+      .catch((err) => {
+        const msg = (err && err.message) || String(err);
+        console.error('TscnSession: browser start failed:', msg);
+        this.broadcastError('浏览器启动失败：' + msg);
+      })
+      .finally(() => {
+        this.starting = null;
+      });
+    
+    // 等待启动完成（可选，不等待也可以让fetch先返回）
+    // await this.starting;
+  }
+
+  broadcastError(message) {
+    const payload = JSON.stringify({ type: 'error', message });
+    for (const ws of this.viewers) {
+      try {
+        ws.send(payload);
+      } catch (e) {
+        this.viewers.delete(ws);
+      }
+    }
   }
 
   async startBrowser() {
