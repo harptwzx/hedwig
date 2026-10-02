@@ -114,7 +114,6 @@
         <p>所有 3D 计算在服务器完成，此处仅显示画面并回传移动指令。</p>
         <input id="serverInput" type="text" style="display:none;">
         <button id="connectBtn">连接服务器</button>
-        <button id="connectBtn">连接服务器</button>
     </div>
 
     <script>
@@ -186,9 +185,19 @@
             };
             ws.onmessage = function (ev) {
                 if (typeof ev.data === 'string') {
-                    // 服务器文本消息（可扩展，如玩家状态）
+                    // 服务器 JSON 消息：帧数据 / 错误提示
+                    try {
+                        var msg = JSON.parse(ev.data);
+                        if (msg.type === 'frame' && !pendingFrame) {
+                            pendingFrame = true;
+                            img.src = 'data:image/jpeg;base64,' + msg.data;
+                        } else if (msg.type === 'error') {
+                            setStatus('错误: ' + msg.message, 'error');
+                        }
+                    } catch (e) {}
                     return;
                 }
+                // 兼容二进制帧
                 if (!pendingFrame) {
                     pendingFrame = true;
                     var reader = new FileReader();
