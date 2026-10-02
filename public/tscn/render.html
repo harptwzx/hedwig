@@ -10,11 +10,19 @@
 </head>
 <body>
     <canvas id="scene"></canvas>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
     <script type="module">
-    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     const TSCN_URL = 'https://raw.githubusercontent.com/harptwzx/hedwig/main/tscn/godot/main.tscn';
-    const MOVE_SPEED = 5.0;
 
     const canvas = document.getElementById('scene');
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -24,20 +32,10 @@
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87a8cc);
-    scene.fog = new THREE.Fog(0x87a8cc, 30, 90);
+    scene.fog = new THREE.Fog(0x87a8cc, 60, 200);
     scene.add(new THREE.HemisphereLight(0xdfeaff, 0x334455, 0.9));
 
-    const camera = new THREE.PerspectiveCamera(60, 960 / 540, 0.1, 200);
-    const camOffset = new THREE.Vector3(0, 6, 9);
-
-    let input = { x: 0, y: 0 };
-    window.__setInput = function (x, y) {
-        input.x = Math.max(-1, Math.min(1, x || 0));
-        input.y = Math.max(-1, Math.min(1, y || 0));
-    };
-    window.__ready = false;
-
-    let player = null;
+    const camera = new THREE.PerspectiveCamera(60, 960 / 540, 0.1, 500);
 
     // ========== tscn 解析器 ==========
     function parseVec(text) {
@@ -137,7 +135,6 @@
     function buildScene(parsed) {
         const root = new THREE.Group();
         const byPath = { '.': root };
-        let playerObj = null;
 
         for (const node of parsed.nodes) {
             const obj = new THREE.Group();
@@ -149,13 +146,6 @@
             byPath[(node.parent === '.' ? '' : node.parent) + '/' + node.name] = obj;
 
             switch (node.type) {
-                case 'StaticBody3D':
-                case 'CharacterBody3D':
-                case 'Area3D':
-                case 'Node3D':
-                case 'Marker3D':
-                    if (node.type === 'CharacterBody3D' && node.name === 'Player') playerObj = obj;
-                    break;
                 case 'MeshInstance3D': {
                     const m = node.props['mesh'] && node.props['mesh'].match(/SubResource\("(.+?)"\)/);
                     const geo = meshGeometryFromSub(m ? parsed.subResources[m[1]] : null);
@@ -190,26 +180,22 @@
                     obj.add(light);
                     break;
                 }
-                case 'Camera3D': break;
                 default: break;
             }
         }
-        return { root, player: playerObj };
+        return root;
     }
 
+    // ========== 加载场景 ==========
     async function loadScene() {
-        let parsed = null;
+        let root = null;
         try {
             const res = await fetch(TSCN_URL + '?t=' + Date.now());
-            if (res.ok) parsed = parseTscn(await res.text());
-        } catch (e) { /* 拉取失败则使用内置演示场景 */ }
-
-        let root = null;
-        if (parsed && parsed.nodes.length > 0) {
-            const built = buildScene(parsed);
-            root = built.root;
-            player = built.player;
-        }
+            if (res.ok) {
+                const parsed = parseTscn(await res.text());
+                if (parsed.nodes.length > 0) root = buildScene(parsed);
+            }
+        } catch (e) { /* 使用演示场景 */ }
 
         if (!root || root.children.length === 0) {
             root = new THREE.Group();
@@ -223,61 +209,48 @@
             grid.position.y = 0.01;
             root.add(grid);
         }
-
-        if (!player) {
-            player = new THREE.Group();
-            player.name = 'Player';
-            const cap = new THREE.Mesh(
-                new THREE.CapsuleGeometry(0.4, 0.8, 8, 16),
-                new THREE.MeshStandardMaterial({ color: 0xc0392b, roughness: 0.6 })
-            );
-            cap.position.y = 0.8;
-            cap.castShadow = true;
-            player.add(cap);
-            player.position.set(0, 0, 0);
-            root.add(player);
-        }
-
-        player.traverse(function (o) { o.castShadow = true; });
-
         scene.add(root);
-        camera.position.copy(player.position).add(camOffset);
-        camera.lookAt(player.position);
+        return root;
     }
 
-    let lastTime = performance.now();
-    function tick() {
-        const now = performance.now();
-        const dt = Math.min((now - lastTime) / 1000, 0.1);
-        lastTime = now;
+    // ========== 轨道相机 ==========
+    let controls = null;
 
-        if (player) {
-            const len = Math.hypot(input.x, input.y);
-            if (len > 0.05) {
-                const dir = new THREE.Vector3(input.x, 0, input.y);
-                if (len > 1) dir.divideScalar(len);
-                player.position.addScaledVector(dir, MOVE_SPEED * dt);
-                player.position.x = Math.max(-19, Math.min(19, player.position.x));
-                player.position.z = Math.max(-19, Math.min(19, player.position.z));
-            }
-        }
+    loadScene().then(function (root) {
+        const box = new THREE.Box3().setFromObject(root);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const radius = Math.max(size.x, size.y, size.z, 1);
 
-        const camTarget = player ? player.position : new THREE.Vector3();
-        const desired = camTarget.clone().add(camOffset);
-        camera.position.lerp(desired, Math.min(dt * 5, 1));
-        camera.lookAt(camTarget);
+        camera.position.set(
+            center.x + radius * 0.9,
+            center.y + radius * 0.7,
+            center.z + radius * 0.9
+        );
 
-        renderer.render(scene, camera);
-        requestAnimationFrame(tick);
-    }
+        controls = new OrbitControls(camera, canvas);
+        controls.target.copy(center);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.maxDistance = radius * 6;
+        controls.minDistance = radius * 0.1;
+        controls.update();
 
-    loadScene().then(function () {
         window.__ready = true;
         requestAnimationFrame(tick);
     }).catch(function (e) {
+        camera.position.set(8, 6, 10);
+        controls = new OrbitControls(camera, canvas);
+        controls.target.set(0, 0, 0);
         window.__ready = true;
         requestAnimationFrame(tick);
     });
+
+    function tick() {
+        if (controls) controls.update();
+        renderer.render(scene, camera);
+        requestAnimationFrame(tick);
+    }
     </script>
 </body>
 </html>
