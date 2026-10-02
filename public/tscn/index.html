@@ -37,28 +37,6 @@
         #status.connected { color: #3fb950; }
         #status.error { color: #f85149; }
 
-        /* 虚拟操纵杆 */
-        #joystickZone {
-            position: absolute;
-            left: 24px; bottom: 24px;
-            width: 150px; height: 150px;
-            z-index: 20;
-        }
-        #joyBase {
-            position: absolute; inset: 0;
-            border-radius: 50%;
-            background: rgba(255,255,255,.06);
-            border: 2px solid rgba(255,255,255,.18);
-        }
-        #joyKnob {
-            position: absolute;
-            width: 62px; height: 62px;
-            left: 44px; top: 44px;
-            border-radius: 50%;
-            background: rgba(88,166,255,.35);
-            border: 2px solid rgba(88,166,255,.7);
-            box-shadow: 0 0 12px rgba(88,166,255,.35);
-        }
         #hint {
             position: absolute; right: 16px; bottom: 20px;
             color: #6e7681; font-size: 12px; text-align: right;
@@ -99,19 +77,14 @@
         </div>
     </div>
 
-    <div id="joystickZone">
-        <div id="joyBase"></div>
-        <div id="joyKnob"></div>
-    </div>
-
     <div id="hint">
-        触屏：左下操纵杆移动<br>
-        键盘：WASD / 方向键移动
+        鼠标拖动旋转视角<br>
+        滚轮缩放 / 右键平移
     </div>
 
     <div id="cover">
         <h1>TSCN 3D 场景查看器</h1>
-        <p>所有 3D 计算在服务器完成，此处仅显示画面并回传移动指令。</p>
+        <p>所有 3D 计算在服务器完成，此处仅显示画面。</p>
         <input id="serverInput" type="text" style="display:none;">
         <button id="connectBtn">连接服务器</button>
     </div>
@@ -146,7 +119,6 @@
         // ========== 绘制一帧 ==========
         img.onload = function () {
             pendingFrame = false;
-            // 等比缩放铺满
             var cw = canvas.width, ch = canvas.height;
             var iw = img.width, ih = img.height;
             var scale = Math.min(cw / iw, ch / ih);
@@ -165,7 +137,6 @@
 
         // ========== WebSocket ==========
         function connect() {
-            // 默认连接本站同源 WebSocket（Durable Object 会话）
             var url = serverInput.value.trim() ||
                 (location.origin.replace(/^http/, 'ws') + '/tscn/ws');
             connectBtn.disabled = true;
@@ -185,7 +156,6 @@
             };
             ws.onmessage = function (ev) {
                 if (typeof ev.data === 'string') {
-                    // 服务器 JSON 消息：帧数据 / 错误提示
                     try {
                         var msg = JSON.parse(ev.data);
                         if (msg.type === 'frame' && !pendingFrame) {
@@ -197,7 +167,6 @@
                     } catch (e) {}
                     return;
                 }
-                // 兼容二进制帧
                 if (!pendingFrame) {
                     pendingFrame = true;
                     var reader = new FileReader();
@@ -221,81 +190,6 @@
             };
         }
         connectBtn.addEventListener('click', connect);
-
-        // ========== 移动输入 ==========
-        var input = { x: 0, y: 0 };
-        var lastSent = { x: 0, y: 0 };
-        var keys = {};
-
-        function sendInput() {
-            if (!ws || ws.readyState !== WebSocket.OPEN) return;
-            var ix = input.x + ((keys['KeyD'] || keys['ArrowRight']) ? 1 : 0) - ((keys['KeyA'] || keys['ArrowLeft']) ? 1 : 0);
-            var iy = input.y + ((keys['KeyS'] || keys['ArrowDown']) ? 1 : 0) - ((keys['KeyW'] || keys['ArrowUp']) ? 1 : 0);
-            var len = Math.hypot(ix, iy);
-            if (len > 1) { ix /= len; iy /= len; }
-            if (Math.abs(ix - lastSent.x) > 0.02 || Math.abs(iy - lastSent.y) > 0.02 || (ix === 0 && iy === 0 && (lastSent.x !== 0 || lastSent.y !== 0))) {
-                lastSent = { x: ix, y: iy };
-                ws.send(JSON.stringify({ type: 'input', x: ix, y: iy }));
-            }
-        }
-        setInterval(sendInput, 50);
-
-        // 键盘
-        document.addEventListener('keydown', function (e) { keys[e.code] = true; });
-        document.addEventListener('keyup', function (e) { keys[e.code] = false; });
-
-        // 虚拟操纵杆
-        var zone = document.getElementById('joystickZone');
-        var base = document.getElementById('joyBase');
-        var knob = document.getElementById('joyKnob');
-        var joyActive = false, joyId = null;
-        var RADIUS = 75, KNOB_R = 31;
-
-        function joyMove(touch) {
-            var rect = base.getBoundingClientRect();
-            var cx = rect.left + rect.width / 2;
-            var cy = rect.top + rect.height / 2;
-            var dx = touch.clientX - cx;
-            var dy = touch.clientY - cy;
-            var dist = Math.hypot(dx, dy);
-            if (dist > RADIUS - KNOB_R) {
-                dx = dx / dist * (RADIUS - KNOB_R);
-                dy = dy / dist * (RADIUS - KNOB_R);
-            }
-            knob.style.left = (44 + dx) + 'px';
-            knob.style.top = (44 + dy) + 'px';
-            input.x = dx / (RADIUS - KNOB_R);
-            input.y = dy / (RADIUS - KNOB_R);
-        }
-        function joyReset() {
-            joyActive = false; joyId = null;
-            knob.style.left = '44px';
-            knob.style.top = '44px';
-            input.x = 0; input.y = 0;
-        }
-        zone.addEventListener('touchstart', function (e) {
-            e.preventDefault();
-            joyActive = true;
-            joyId = e.changedTouches[0].identifier;
-            joyMove(e.changedTouches[0]);
-        }, { passive: false });
-        zone.addEventListener('touchmove', function (e) {
-            e.preventDefault();
-            for (var i = 0; i < e.changedTouches.length; i++) {
-                if (e.changedTouches[i].identifier === joyId) joyMove(e.changedTouches[i]);
-            }
-        }, { passive: false });
-        zone.addEventListener('touchend', function (e) {
-            for (var i = 0; i < e.changedTouches.length; i++) {
-                if (e.changedTouches[i].identifier === joyId) joyReset();
-            }
-        });
-        zone.addEventListener('touchcancel', joyReset);
-
-        // 桌面调试用鼠标拖动
-        zone.addEventListener('mousedown', function (e) { joyActive = true; joyMove(e); });
-        document.addEventListener('mousemove', function (e) { if (joyActive && e.buttons) joyMove(e); });
-        document.addEventListener('mouseup', function () { if (joyActive) joyReset(); });
     })();
     </script>
 </body>
