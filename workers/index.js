@@ -2,6 +2,7 @@ import api from './api.js';
 import hfProxy from './hf-proxy.js';
 import fileShare from './file-share.js';
 import tscn from './tscn.js';
+import tscn2 from './tscn2.js';
 
 export { TscnSession } from './tscn-session.js';
 
@@ -20,9 +21,14 @@ export default {
             return stub.fetch(request);
         }
 
-        // TSCN 3D 场景查看器 - 匹配 /tscn 和 /tscn/*
+        // TSCN 3D 场景查看器（服务器推流版）
         if (url.pathname === '/tscn' || url.pathname === '/tscn/' || url.pathname.startsWith('/tscn/')) {
             return tscn.fetch(request, env, ctx);
+        }
+
+        // TSCN 纯前端渲染版（无需服务器）
+        if (url.pathname === '/tscn2' || url.pathname === '/tscn2/' || url.pathname.startsWith('/tscn2/')) {
+            return tscn2.fetch(request, env, ctx);
         }
 
         // 文件分享路由 - 匹配 /share 和 /api/file/*
