@@ -24,7 +24,6 @@ export class TscnSession {
     this.state = state;
     this.env = env;
     this.viewers = new Set();
-    this.input = { x: 0, y: 0 };
     this.browser = null;
     this.page = null;
     this.frameTimer = null;
@@ -43,17 +42,6 @@ export class TscnSession {
     this.state.acceptWebSocket(server);
     this.viewers.add(server);
     this.resetIdleTimer();
-
-    server.addEventListener('message', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'input') {
-          this.input.x = typeof data.x === 'number' ? data.x : 0;
-          this.input.y = typeof data.y === 'number' ? data.y : 0;
-          this.sendInputToPage();
-        }
-      } catch (e) { /* 忽略非法消息 */ }
-    });
 
     server.addEventListener('close', () => {
       this.viewers.delete(server);
@@ -82,7 +70,6 @@ export class TscnSession {
     this.page = await this.browser.newPage();
     await this.page.setViewport(VIEWPORT);
 
-    // 打开 render.html 并等待 window.__ready 变为 true
     await this.page.goto(RENDER_URL, {
       waitUntil: 'networkidle0',
       timeout: 30000,
@@ -119,17 +106,6 @@ export class TscnSession {
         console.error('Screenshot failed:', (err && err.message) || String(err));
       }
     }, interval);
-  }
-
-  async sendInputToPage() {
-    if (!this.page) return;
-    try {
-      await this.page.evaluate(
-        (x, y) => { if (window.__setInput) window.__setInput(x, y); },
-        this.input.x,
-        this.input.y
-      );
-    } catch (e) { /* 页面可能正忙，忽略 */ }
   }
 
   resetIdleTimer() {
