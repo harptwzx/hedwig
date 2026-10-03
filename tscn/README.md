@@ -22,6 +22,26 @@
 - `wrangler.toml`：新增 `BROWSER` 绑定 + `TSCN_SESSION` Durable Object
 - `tscn/godot/main.tscn`：场景源文件，渲染页实时从 GitHub 拉取解析
 
+## /tscn2：地形场景查看器（纯前端）
+
+`hedwig.eu.org/tscn2` 是免服务器的 3D 查看器，浏览器直接用 Three.js 渲染
+`tscn/godot/terrain.tscn`，风格模仿 Terrain3D 演示场景：程序化山地（草/岩/雪
+自动分色）、湖泊水面、随机散布的树木与岩石、渐变天空 + 太阳。打开页面先自动
+环绕浏览，鼠标操作后接管。
+
+地形参数写在 `terrain.tscn` 中 `Terrain` 节点的 metadata 里，改数值提交即可：
+
+| metadata | 说明 | 默认 |
+|---|---|---|
+| `seed` | 随机种子（决定山体与植被分布） | 42 |
+| `size` | 地形边长（米） | 240 |
+| `height` | 山体高度 | 26 |
+| `water_level` | 水面高度 | 1.2 |
+| `trees` / `rocks` | 树 / 岩石散布数量 | 160 / 70 |
+
+场景中额外的 `MeshInstance3D`、`OmniLight3D`、`Player` 节点也会被解析渲染
+（自动吸附到地形表面）。天空颜色取自 `ProceduralSkyMaterial` 子资源。
+
 ## 免费额度与限制
 
 - Browser Rendering：免费计划 **10 分钟浏览器时间/天**、3 个并发浏览器；超过后 $0.09/小时
