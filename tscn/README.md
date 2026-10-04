@@ -37,7 +37,13 @@
 | `size` | 地形边长（米） | 240 |
 | `height` | 山体高度 | 26 |
 | `water_level` | 水面高度 | 1.2 |
-| `trees` / `rocks` | 树 / 岩石散布数量 | 160 / 70 |
+| `trees` | 树木数量（松树/阔叶混种） | 160 |
+| `rocks` | 岩石数量 | 70 |
+| `bushes` / `flowers` | 灌木 / 野花数量 | 60 / 80 |
+| `house` | 是否生成度假小屋（0/1） | 1 |
+| `clouds` | 云朵数量 | 9 |
+
+小屋会自动寻找湖边平地落座，门口朝向山谷，带发光窗户、烟囱和栅栏。
 
 场景中额外的 `MeshInstance3D`、`OmniLight3D`、`Player` 节点也会被解析渲染
 （自动吸附到地形表面）。天空颜色取自 `ProceduralSkyMaterial` 子资源。
