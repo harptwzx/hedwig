@@ -1,8 +1,14 @@
 [gd_scene load_steps=5 format=3 uid="uid://hedwigterrain01"]
 
+; /tscn2「湖畔村庄」场景配置说明
+; 注意：地形形状由 public/tscn2/assets/terrain.bin（二进制高度图）决定，
+;       可用 node tools/gen_terrain.mjs 重新生成；
+;       本文件中的 metadata 与网页端 index.html 的 CFG 对应，供参考与调参。
+; 植被/道具模型：Kenney Fantasy Town + Modular Buildings（CC0）。
+
 [sub_resource type="ProceduralSkyMaterial" id="SkyMat_1"]
-sky_top_color = Color(0.22, 0.46, 0.82, 1)
-sky_horizon_color = Color(0.72, 0.82, 0.92, 1)
+sky_top_color = Color(0.36, 0.58, 0.82, 1)
+sky_horizon_color = Color(0.74, 0.85, 0.94, 1)
 ground_bottom_color = Color(0.12, 0.14, 0.16, 1)
 ground_horizon_color = Color(0.55, 0.62, 0.7, 1)
 sun_angle_max = 30.0
@@ -14,12 +20,8 @@ sky_material = SubResource("SkyMat_1")
 background_mode = 2
 sky = SubResource("Sky_1")
 ambient_light_source = 2
-ambient_light_color = Color(0.75, 0.82, 0.9, 1)
-ambient_light_energy = 0.55
-
-[sub_resource type="CapsuleMesh" id="CapsuleMesh_1"]
-radius = 0.4
-height = 1.6
+ambient_light_color = Color(0.81, 0.88, 0.95, 1)
+ambient_light_energy = 0.85
 
 [node name="Main" type="Node3D"]
 
@@ -27,30 +29,30 @@ height = 1.6
 environment = SubResource("Environment_1")
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.707107, -0.53033, 0.469846, 0, 0.663414, 0.748251, -0.707107, -0.53033, 0.469846, 40, 60, 40)
-light_color = Color(1, 0.95, 0.85, 1)
-light_energy = 2.0
+transform = Transform3D(0.858, -0.415, 0.303, 0, 0.59, 0.807, -0.514, -0.692, 0.507, 220, 220, 220)
+light_color = Color(1, 0.95, 0.87, 1)
+light_energy = 2.15
 shadow_enabled = true
 
 [node name="Terrain" type="Node3D" parent="."]
-metadata/terrain_kind = "procedural"
-metadata/seed = 42
-metadata/size = 240
-metadata/height = 26
-metadata/water_level = 1.2
-metadata/trees = 160
-metadata/rocks = 70
-metadata/bushes = 60
-metadata/flowers = 80
-metadata/clouds = 9
-metadata/house = 1
+metadata/scene_kind = "lakeside_village"
+metadata/seed = 20240517
+metadata/size = 400
+metadata/mountain_height = 58
+metadata/water_level = 2.2
+metadata/trees = 900
+metadata/rocks = 60
 
-[node name="Player" type="CharacterBody3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 3, 20)
+[node name="Village" type="Node3D" parent="."]
+metadata/center_x = 40
+metadata/center_z = 22
+metadata/ground_y = 5.5
 
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Player"]
-mesh = SubResource("CapsuleMesh_1")
+[node name="Lake" type="Node3D" parent="."]
+metadata/center_x = -58
+metadata/center_z = 30
+metadata/radius = 54
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.819152, 0.573576, 0, -0.573576, 0.819152, 30, 28, 55)
+transform = Transform3D(1, 0, 0, 0, 0.927184, 0.374607, 0, -0.374607, 0.927184, 76, 26, 66)
 current = true

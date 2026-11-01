@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>地形场景查看器 - Hedwig</title>
+    <title>湖畔村庄 · 3D 场景 - Hedwig</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
@@ -12,64 +12,52 @@
             overflow: hidden;
             font-family: -apple-system, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
         }
-        #scene {
-            position: absolute; inset: 0;
-            width: 100%; height: 100%;
-            display: block;
-        }
+        #scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
         #hud {
             position: absolute; top: 0; left: 0; right: 0;
             display: flex; justify-content: space-between; align-items: center;
-            padding: 10px 14px;
-            pointer-events: none;
-            z-index: 10;
+            padding: 10px 14px; pointer-events: none; z-index: 10;
         }
         #hud .info {
             color: #c9d1d9; font-size: 13px;
-            background: rgba(13,17,23,.65);
-            padding: 6px 12px; border-radius: 8px;
+            background: rgba(13,17,23,.55); padding: 6px 12px; border-radius: 8px;
             backdrop-filter: blur(4px);
         }
         #hud .info a { color: #58a6ff; text-decoration: none; pointer-events: auto; }
+        #quality { cursor: pointer; pointer-events: auto; }
         #status { color: #8b949e; }
         #status.loading { color: #d29922; }
         #status.ready { color: #3fb950; }
         #status.error { color: #f85149; }
         #hint {
             position: absolute; right: 16px; bottom: 20px;
-            color: rgba(255,255,255,.55); font-size: 12px; text-align: right;
+            color: rgba(255,255,255,.6); font-size: 12px; text-align: right;
             z-index: 10; pointer-events: none; line-height: 1.8;
-            text-shadow: 0 1px 2px rgba(0,0,0,.4);
+            text-shadow: 0 1px 2px rgba(0,0,0,.35);
         }
         #cover {
             position: absolute; inset: 0;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            background: rgba(13,17,23,.92);
-            z-index: 50; color: #c9d1d9;
-            gap: 14px; text-align: center; padding: 20px;
+            background: linear-gradient(180deg, #10203a 0%, #1b3350 100%);
+            z-index: 50; color: #e6edf3; gap: 14px; text-align: center; padding: 20px;
         }
-        #cover h1 { font-size: 22px; }
-        #cover p { color: #8b949e; font-size: 14px; max-width: 420px; line-height: 1.8; }
+        #cover h1 { font-size: 22px; font-weight: 600; }
+        #cover p { color: #9fb3c8; font-size: 14px; max-width: 460px; line-height: 1.8; }
         .spinner {
-            width: 40px; height: 40px;
-            border: 3px solid #30363d;
-            border-top-color: #58a6ff;
-            border-radius: 50%;
+            width: 40px; height: 40px; border: 3px solid #30363d;
+            border-top-color: #58a6ff; border-radius: 50%;
             animation: spin 1s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        #err { color: #ff7b72; display: none; font-size: 12px; max-width: 90%; word-break: break-all; }
     </style>
 </head>
 <body>
     <canvas id="scene"></canvas>
 
     <div id="hud">
-        <div class="info">
-            <a href="/">← Hedwig</a>
-        </div>
-        <div class="info">
-            <span id="status">加载中...</span>
-        </div>
+        <div class="info"><a href="/">← Hedwig</a></div>
+        <div class="info"><span id="quality" title="点击切换画质"></span> · <span id="status">加载中...</span></div>
     </div>
 
     <div id="hint">
@@ -78,9 +66,11 @@
     </div>
 
     <div id="cover">
-        <h1>地形场景查看器</h1>
-        <p>请稍等</p>
+        <h1>湖畔村庄</h1>
+        <p>程序化湖光山色 + Kenney 风格化村庄，纯前端渲染。低性能设备会自动降低画质。</p>
         <div class="spinner"></div>
+        <p id="progress">准备中...</p>
+        <div id="err"></div>
     </div>
 
     <script type="importmap">
@@ -94,103 +84,71 @@
     <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-    const TSCN_URL = 'https://raw.githubusercontent.com/harptwzx/hedwig/main/tscn/godot/terrain.tscn';
+    // ===================================================================
+    // 场景参数（与 tools/gen_terrain.mjs 保持一致）
+    // ===================================================================
+    const CFG = {
+        seed: 20240517,
+        size: 400,
+        grid: 256,
+        mountainHeight: 58,
+        hills: [
+            { x: -140, z: -70, r: 95, h: 26 },
+            { x: -40, z: -140, r: 120, h: 30 },
+            { x: 150, z: -90, r: 105, h: 24 },
+            { x: 165, z: 120, r: 125, h: 18 },
+            { x: -160, z: 130, r: 135, h: 16 },
+            { x: -20, z: 150, r: 110, h: 14 }
+        ],
+        lake: { x: -58, z: 30, r: 54 },
+        village: { x: 40, z: 22, r: 42, y: 5.5 },
+        waterLevel: 2.2,
+        H_MIN: -15,
+        H_MAX: 95
+    };
+    const ASSETS = '/tscn2/assets';
+
+    // ===================================================================
+    // 画质分级
+    // ===================================================================
+    const params = new URLSearchParams(location.search);
+    const isSmall = Math.min(innerWidth, innerHeight) < 520 ||
+        /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    let tier = params.get('q') || (isSmall ? 'low' : 'high');
+
+    function qualityFromTier(t) {
+        return t === 'low'
+            ? { segs: 128, trees: 0.35, rocks: 0.5, shadows: false, pixelRatio: 1, antialias: false, shadowMap: 512 }
+            : { segs: 256, trees: 1.0, rocks: 1.0, shadows: true, pixelRatio: Math.min(devicePixelRatio, 2), antialias: true, shadowMap: 2048 };
+    }
+    let Q = qualityFromTier(tier);
 
     const statusEl = document.getElementById('status');
+    const qualityEl = document.getElementById('quality');
+    const progressEl = document.getElementById('progress');
+    const errEl = document.getElementById('err');
     const cover = document.getElementById('cover');
-
-    function setStatus(text, cls) {
-        statusEl.textContent = text;
-        statusEl.className = cls || '';
+    function setStatus(t, c) { statusEl.textContent = t; statusEl.className = c || ''; }
+    function setProgress(t) { progressEl.textContent = t; }
+    function showError(e) {
+        errEl.style.display = 'block';
+        errEl.textContent = '加载失败: ' + (e && e.message ? e.message : e);
+        cover.querySelector('.spinner').style.display = 'none';
+        setStatus('加载失败', 'error');
     }
+    qualityEl.textContent = tier === 'low' ? '低画质' : '高画质';
 
-    // ========== 初始化 Three.js ==========
-    const canvas = document.getElementById('scene');
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
-
-    const scene = new THREE.Scene();
-
-    const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1200);
-
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    // ========== tscn 解析器 ==========
-    function parseVec(text) {
-        return (text.match(/-?\d+\.?\d*(e-?\d+)?/gi) || []).map(Number);
-    }
-
-    function parseTscn(text) {
-        const subResources = {};
-        const nodes = [];
-        let cur = null;
-        for (const raw of text.split('\n')) {
-            const line = raw.trim();
-            if (!line || line.startsWith(';') || line.startsWith('#')) continue;
-            const sec = line.match(/^\[(.+)\]$/);
-            if (sec) {
-                const parts = sec[1].split(/\s+/);
-                const attrs = {};
-                for (let i = 1; i < parts.length; i++) {
-                    const kv = parts[i].split('=');
-                    if (kv.length >= 2) attrs[kv[0]] = kv.slice(1).join('=').replace(/^"|"$/g, '');
-                }
-                if (parts[0] === 'sub_resource') {
-                    cur = { kind: 'sub', type: attrs.type, props: {} };
-                    if (attrs.id) subResources[attrs.id] = cur;
-                } else if (parts[0] === 'node') {
-                    cur = { kind: 'node', name: attrs.name || '', type: attrs.type || 'Node3D', parent: attrs.parent || '.', props: {} };
-                    nodes.push(cur);
-                } else {
-                    cur = null;
-                }
-                continue;
-            }
-            if (!cur) continue;
-            const eq = line.indexOf('=');
-            if (eq < 0) continue;
-            cur.props[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-        }
-        return { subResources, nodes };
-    }
-
-    function applyTransform(obj, transformLine) {
-        const n = parseVec(transformLine);
-        if (n.length < 12) return;
-        const m = new THREE.Matrix4();
-        m.makeBasis(
-            new THREE.Vector3(n[0], n[1], n[2]),
-            new THREE.Vector3(n[3], n[4], n[5]),
-            new THREE.Vector3(n[6], n[7], n[8])
-        );
-        m.setPosition(n[9], n[10], n[11]);
-        m.decompose(obj.position, obj.quaternion, obj.scale);
-    }
-
-    function metaNum(node, key, dflt) {
-        const v = node && node.props['metadata/' + key];
-        if (v === undefined) return dflt;
-        const n = parseFloat(v);
-        return isNaN(n) ? dflt : n;
-    }
-
-    // ========== 确定性噪声（用于地形） ==========
+    // ===================================================================
+    // 噪声与高度场
+    // ===================================================================
     function hash2(ix, iz, seed) {
         let h = (ix * 374761393 + iz * 668265263 + seed * 5011) | 0;
         h = Math.imul(h ^ (h >>> 13), 1274126177);
         return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
     }
-    function smooth(t) { return t * t * (3 - 2 * t); }
+    const smooth = t => t * t * (3 - 2 * t);
     function valueNoise(x, z, seed) {
         const ix = Math.floor(x), iz = Math.floor(z);
         const fx = x - ix, fz = z - iz;
@@ -199,671 +157,446 @@
         const u = smooth(fx), v = smooth(fz);
         return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
     }
-    function fbm(x, z, seed, octaves) {
-        let sum = 0, amp = 0.5, freq = 1, norm = 0;
-        for (let i = 0; i < octaves; i++) {
-            sum += valueNoise(x * freq, z * freq, seed + i * 101) * amp;
-            norm += amp; amp *= 0.5; freq *= 2.1;
+    function fbm(x, z, seed, oct = 4) {
+        let s = 0, amp = 0.5, f = 1, n = 0;
+        for (let i = 0; i < oct; i++) { s += valueNoise(x * f, z * f, seed + i * 101) * amp; n += amp; amp *= 0.5; f *= 2.03; }
+        return s / n;
+    }
+    function noiseHeightAt(x, z) {
+        const nx = x / CFG.size, nz = z / CFG.size;
+        let h = fbm(nx * 2.4 + 11.3, nz * 2.4 + 5.7, CFG.seed, 4) * 4.5;
+        h += fbm(nx * 6.0 + 3.1, nz * 6.0 + 9.9, CFG.seed + 77, 3) * 2.0;
+        h += fbm(nx * 13.0 + 1.7, nz * 13.0 + 4.3, CFG.seed + 200, 2) * 0.8;
+        for (const hi of CFG.hills) {
+            const d = Math.hypot(x - hi.x, z - hi.z) / hi.r;
+            h += hi.h * Math.max(0, 1 - d * d) ** 1.6;
         }
-        return sum / norm;
+        const mnt = smooth(Math.min(Math.max((-z - 60) / 190, 0), 1));
+        const ridge = 1 - Math.abs(2 * fbm(nx * 2.2 + 21.0, nz * 2.2 + 4.0, CFG.seed + 555, 4) - 1);
+        h += mnt * (ridge * ridge * CFG.mountainHeight * 0.75 + fbm(nx * 4 + 2, nz * 4 + 8, CFG.seed + 9, 3) * CFG.mountainHeight * 0.35);
+        const dl = Math.hypot(x - CFG.lake.x, z - CFG.lake.z);
+        const lakeT = smooth(Math.min(Math.max((dl - CFG.lake.r * 0.55) / (CFG.lake.r * 0.75), 0), 1));
+        h = h * lakeT + (CFG.waterLevel - 4.0) * (1 - lakeT);
+        const dv = Math.hypot(x - CFG.village.x, z - CFG.village.z);
+        const vT = smooth(Math.min(Math.max((dv - CFG.village.r * 0.55) / 22, 0), 1));
+        h = h * vT + CFG.village.y * (1 - vT);
+        return h;
+    }
+
+    // 二进制高度图（优先），失败则回退到噪声
+    let heightAt = noiseHeightAt;
+    async function loadHeightmap() {
+        try {
+            const res = await fetch(`${ASSETS}/terrain.bin`);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const buf = new Uint16Array(await res.arrayBuffer());
+            const N = CFG.grid;
+            if (buf.length < N * N) throw new Error('heightmap too small');
+            const step = CFG.size / (N - 1);
+            heightAt = (x, z) => {
+                const fx = (x + CFG.size / 2) / step, fz = (z + CFG.size / 2) / step;
+                const ix = Math.max(0, Math.min(N - 2, Math.floor(fx)));
+                const iz = Math.max(0, Math.min(N - 2, Math.floor(fz)));
+                const tx = Math.max(0, Math.min(1, fx - ix)), tz = Math.max(0, Math.min(1, fz - iz));
+                const s = (i, j) => buf[j * N + i] / 65535 * (CFG.H_MAX - CFG.H_MIN) + CFG.H_MIN;
+                const a = s(ix, iz), b = s(ix + 1, iz), c = s(ix, iz + 1), d = s(ix + 1, iz + 1);
+                return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+            };
+            return 'binary';
+        } catch (e) {
+            console.warn('terrain.bin 不可用，改用内置噪声：', e.message);
+            return 'noise';
+        }
+    }
+
+    function slopeAt(x, z) {
+        const e = 2.0, h = heightAt(x, z);
+        return Math.max(
+            Math.abs(heightAt(x + e, z) - h),
+            Math.abs(heightAt(x, z + e) - h)
+        ) / e;
     }
     function mulberry32(seed) {
         let s = seed >>> 0 || 1;
-        return () => {
-            s = (s + 0x6D2B79F5) | 0;
-            let t = Math.imul(s ^ (s >>> 15), 1 | s);
-            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-        };
+        return () => { s = (s + 0x6D2B79F5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
     }
 
-    // ========== 天空穹顶（渐变 + 太阳） ==========
-    function makeSky(skyTop, skyHorizon, sunDir) {
-        const geo = new THREE.SphereGeometry(600, 32, 15);
+    // ===================================================================
+    // 渲染器 / 场景 / 相机
+    // ===================================================================
+    const canvas = document.getElementById('scene');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Q.pixelRatio);
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = Q.shadows;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.02;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.5, 2200);
+    const SKY_TOP = 0x5b93d1, SKY_HORIZON = 0xbcd9f0;
+
+    addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+    });
+
+    // ===================================================================
+    // 天空 / 光照
+    // ===================================================================
+    const SUN_DIR = new THREE.Vector3(0.46, 0.72, 0.52).normalize();
+
+    function addSky() {
+        const geo = new THREE.SphereGeometry(1000, 32, 16);
         const mat = new THREE.ShaderMaterial({
-            side: THREE.BackSide,
-            depthWrite: false,
+            side: THREE.BackSide, depthWrite: false,
             uniforms: {
-                topColor: { value: new THREE.Color(skyTop) },
-                horizonColor: { value: new THREE.Color(skyHorizon) },
-                sunDir: { value: sunDir.clone().normalize() },
-                sunColor: { value: new THREE.Color(0xfff3d6) }
+                topColor: { value: new THREE.Color(SKY_TOP) },
+                horizonColor: { value: new THREE.Color(SKY_HORIZON) },
+                sunDir: { value: SUN_DIR.clone() },
+                sunColor: { value: new THREE.Color(0xfff2d0) }
             },
-            vertexShader: `
-                varying vec3 vDir;
-                void main() {
-                    vDir = normalize(position);
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }`,
+            vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
             fragmentShader: `
                 uniform vec3 topColor, horizonColor, sunColor, sunDir;
                 varying vec3 vDir;
-                void main() {
+                void main(){
                     float h = clamp(vDir.y, 0.0, 1.0);
-                    vec3 col = mix(horizonColor, topColor, pow(h, 0.55));
+                    vec3 col = mix(horizonColor, topColor, pow(h, 0.6));
                     float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
-                    col += sunColor * (pow(s, 350.0) * 1.2 + pow(s, 8.0) * 0.18);
+                    col += sunColor * (pow(s, 420.0) * 1.1 + pow(s, 9.0) * 0.16);
                     gl_FragColor = vec4(col, 1.0);
                 }`
         });
-        const sky = new THREE.Mesh(geo, mat);
-        sky.name = 'SkyDome';
-        return sky;
+        scene.add(new THREE.Mesh(geo, mat));
     }
 
-    // ========== 程序化地形 ==========
-    let terrainHeightAt = () => 0;
-
-    function buildTerrain(cfg) {
-        const size = cfg.size, amp = cfg.height, seed = cfg.seed;
-        const segs = 200;
-        const geo = new THREE.PlaneGeometry(size, size, segs, segs);
-        geo.rotateX(-Math.PI / 2);
-
-        const pos = geo.attributes.position;
-        const freq = 2.6 / size;
-
-        function heightAt(x, z) {
-            // 山体 fbm + 中央抬升，边缘略降形成湖泊洼地
-            let h = fbm(x * freq + 7.3, z * freq + 3.1, seed, 5);
-            h = Math.pow(h, 1.6) * amp * 1.9;
-            const d = Math.sqrt(x * x + z * z) / (size * 0.5);
-            h += (1 - smooth(Math.min(d, 1))) * amp * 0.45;
-            h -= Math.pow(Math.max(d - 0.55, 0) / 0.45, 2) * amp * 0.35;
-            return h - amp * 0.28;
+    let sun = null;
+    function addLights() {
+        scene.add(new THREE.HemisphereLight(0xcfe0f2, 0x4a5a3a, 0.85));
+        sun = new THREE.DirectionalLight(0xfff3dd, 2.15);
+        const v = CFG.village;
+        sun.position.set(v.x + SUN_DIR.x * 220, SUN_DIR.y * 220, v.z + SUN_DIR.z * 220);
+        sun.target.position.set(v.x, v.y, v.z);
+        scene.add(sun, sun.target);
+        if (Q.shadows) {
+            sun.castShadow = true;
+            sun.shadow.mapSize.set(Q.shadowMap, Q.shadowMap);
+            const c = sun.shadow.camera;
+            const half = 130;
+            c.left = -half; c.right = half; c.top = half; c.bottom = -half;
+            c.near = 40; c.far = 520;
+            sun.shadow.bias = -0.0006;
+            sun.shadow.normalBias = 0.6;
         }
-        terrainHeightAt = heightAt;
+    }
 
+    // ===================================================================
+    // 地形 / 水面
+    // ===================================================================
+    function buildTerrain() {
+        const geo = new THREE.PlaneGeometry(CFG.size, CFG.size, Q.segs, Q.segs);
+        geo.rotateX(-Math.PI / 2);
+        const pos = geo.attributes.position;
         const colors = new Float32Array(pos.count * 3);
-        const cSand = new THREE.Color(0xc7b489);
-        const cGrass1 = new THREE.Color(0x4e7a38);
-        const cGrass2 = new THREE.Color(0x7a9a4a);
-        const cRock = new THREE.Color(0x7d7a72);
-        const cSnow = new THREE.Color(0xeef1f4);
+        const cGrass = new THREE.Color(0x6d9a4a), cGrass2 = new THREE.Color(0x557f3a);
+        const cRock = new THREE.Color(0x9aa0a2), cSand = new THREE.Color(0xc9b184), cSnow = new THREE.Color(0xe8eef2);
         const tmp = new THREE.Color();
-
         for (let i = 0; i < pos.count; i++) {
             const x = pos.getX(i), z = pos.getZ(i);
             const h = heightAt(x, z);
             pos.setY(i, h);
-
-            // 坡度估计
-            const e = 1.2;
-            const slope = Math.max(
-                Math.abs(heightAt(x + e, z) - h),
-                Math.abs(heightAt(x, z + e) - h)
-            ) / e;
-
-            const w = cfg.waterLevel;
-            const t = h / amp;
-            const nmix = fbm(x * 0.08 + 11, z * 0.08 + 5, seed + 999, 3);
-
-            if (h < w + 0.6) {
-                tmp.copy(cSand);
-            } else if (t > 0.72) {
-                tmp.copy(cSnow);
-            } else {
-                tmp.copy(cGrass1).lerp(cGrass2, nmix);
-                if (slope > 0.75) tmp.lerp(cRock, Math.min((slope - 0.75) * 2.2, 1));
-                if (t > 0.55) tmp.lerp(cSnow, smooth((t - 0.55) / 0.17) * 0.8);
+            const sl = slopeAt(x, z);
+            const n = fbm(x * 0.05 + 3, z * 0.05 + 7, CFG.seed + 31, 3);
+            if (h < CFG.waterLevel + 0.35) tmp.copy(cSand);
+            else {
+                tmp.copy(cGrass).lerp(cGrass2, n);
+                if (sl > 0.55) tmp.lerp(cRock, Math.min((sl - 0.55) * 1.6, 1));
+                if (h > CFG.mountainHeight * 0.78) tmp.lerp(cSnow, Math.min((h - CFG.mountainHeight * 0.78) / (CFG.mountainHeight * 0.3), 1) * 0.9);
             }
-            // 轻微随机色斑，避免纯色
-            const jitter = 0.92 + hash2(Math.round(x * 3), Math.round(z * 3), seed + 7) * 0.16;
-            colors[i * 3] = tmp.r * jitter;
-            colors[i * 3 + 1] = tmp.g * jitter;
-            colors[i * 3 + 2] = tmp.b * jitter;
+            colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
         }
         geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         geo.computeVertexNormals();
-
-        const mat = new THREE.MeshStandardMaterial({
-            vertexColors: true,
-            roughness: 0.95,
-            metalness: 0.0
-        });
+        const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, flatShading: true });
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.receiveShadow = true;
-        mesh.castShadow = true;
         mesh.name = 'Terrain';
+        mesh.receiveShadow = Q.shadows;
         return mesh;
     }
 
-    // ========== 水面 ==========
-    function buildWater(cfg) {
-        const size = cfg.size * 1.6;
-        const geo = new THREE.PlaneGeometry(size, size, 1, 1);
-        geo.rotateX(-Math.PI / 2);
+    function buildWater() {
+        const r = CFG.lake.r;
+        const geo = new THREE.PlaneGeometry(r * 2.5, r * 2.5, 1, 1).rotateX(-Math.PI / 2);
         const mat = new THREE.MeshStandardMaterial({
-            color: 0x2b6d94,
-            transparent: true,
-            opacity: 0.78,
-            roughness: 0.12,
-            metalness: 0.35
+            color: 0x4f9fd4, transparent: true, opacity: 0.85,
+            roughness: 0.18, metalness: 0.15
         });
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.y = cfg.waterLevel;
-        mesh.receiveShadow = true;
+        mesh.position.set(CFG.lake.x, CFG.waterLevel, CFG.lake.z);
         mesh.name = 'Water';
         return mesh;
     }
 
-    // ========== 植被与岩石散布 ==========
-    function slopeAt(x, z) {
-        const e = 1.2, h = terrainHeightAt(x, z);
-        return Math.max(
-            Math.abs(terrainHeightAt(x + e, z) - h),
-            Math.abs(terrainHeightAt(x, z + e) - h)
-        ) / e;
-    }
+    // ===================================================================
+    // 布局（与预览一致）
+    // ===================================================================
+    const V = CFG.village;
 
-    function scatterPositions(cfg, count, minH, maxH, maxSlope, rng, avoid) {
+    function villageTiles() {
+        const plaza = [], roads = [];
+        const R = 3;
+        for (let i = -R; i <= R; i++) for (let j = -R; j <= R; j++) {
+            if (Math.abs(i) + Math.abs(j) > R + 1) continue;
+            plaza.push([i, j, 0]);
+        }
+        for (let k = R + 1; k <= 9; k++) roads.push([0, -k, 0]);
+        for (let k = R + 1; k <= 9; k++) roads.push([k, 3, 0]);
+        for (let k = R + 1; k <= 9; k++) roads.push([-k, 4, 0]);
+        for (let k = R + 1; k <= 10; k++) roads.push([2, k, 0]);
+        return { plaza, roads };
+    }
+    const houses = [
+        { model: 'building-sample-house-a', x: 0, z: -10, ry: 0 },
+        { model: 'building-sample-house-b', x: 10.5, z: 3, ry: -Math.PI / 2 },
+        { model: 'building-sample-house-c', x: -10.5, z: 4, ry: Math.PI / 2 },
+        { model: 'building-sample-house-a', x: 2, z: 11.5, ry: Math.PI }
+    ];
+    const props = [
+        { model: 'cart', x: -6.5, z: 7.5, ry: 0.5 },
+        { model: 'stall', x: 6, z: 6.2, ry: 1.6 },
+        { model: 'stall', x: 7.4, z: 5.6, ry: 1.6 },
+        { model: 'lantern', x: -3.6, z: -3.6, ry: 0 },
+        { model: 'lantern', x: 3.6, z: -3.6, ry: 0 },
+        { model: 'lantern', x: 3.6, z: 3.6, ry: 0 },
+        { model: 'lantern', x: -3.6, z: 3.6, ry: 0 },
+        { model: 'pillar-wood', x: -14, z: 4, ry: 0 },
+        { model: 'pillar-wood', x: -18, z: 4, ry: 0 }
+    ];
+
+    function scatter(cfgRng, count, opts) {
+        const { minH = -1e9, maxH = 1e9, maxSlope = 1e9, region = null, avoid = [] } = opts || {};
         const pts = [];
-        const half = cfg.size * 0.46;
-        let guard = count * 30;
+        const half = CFG.size * 0.47;
+        let guard = count * 60;
         while (pts.length < count && guard-- > 0) {
-            const x = (rng() * 2 - 1) * half;
-            const z = (rng() * 2 - 1) * half;
-            if (avoid && avoid.some(a => (x - a[0]) ** 2 + (z - a[1]) ** 2 < a[2] * a[2])) continue;
-            const h = terrainHeightAt(x, z);
+            let x, z;
+            if (region) {
+                const a = cfgRng() * Math.PI * 2, r = Math.sqrt(cfgRng()) * region.r;
+                x = region.x + Math.cos(a) * r; z = region.z + Math.sin(a) * r;
+            } else { x = (cfgRng() * 2 - 1) * half; z = (cfgRng() * 2 - 1) * half; }
+            if (avoid.some(a => (x - a.x) ** 2 + (z - a.z) ** 2 < a.r * a.r)) continue;
+            const h = heightAt(x, z);
             if (h < minH || h > maxH) continue;
-            if (slopeAt(x, z) > maxSlope) continue;
-            pts.push([x, h, z]);
+            const sl = slopeAt(x, z);
+            if (sl > maxSlope) continue;
+            pts.push({ x, y: h, z, rx: cfgRng(), ry: cfgRng() * Math.PI * 2, rz: cfgRng() });
+        }
+        return pts;
+    }
+    function groves(rng, opts) {
+        const { groves = 60, perGrove = 14, region, avoid = [], minH = CFG.waterLevel + 1, maxSlope = 1.35, spread = 15 } = opts;
+        const pts = [];
+        for (let g = 0; g < groves; g++) {
+            const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * region.r;
+            const cx = region.x + Math.cos(a) * r, cz = region.z + Math.sin(a) * r;
+            if (avoid.some(av => (cx - av.x) ** 2 + (cz - av.z) ** 2 < av.r * av.r)) continue;
+            if (heightAt(cx, cz) < minH) continue;
+            const n = Math.round(perGrove * (0.5 + rng()));
+            for (let k = 0; k < n; k++) {
+                const ang = rng() * Math.PI * 2, rad = Math.sqrt(rng()) * spread;
+                const x = cx + Math.cos(ang) * rad, z = cz + Math.sin(ang) * rad;
+                if (avoid.some(av => (x - av.x) ** 2 + (z - av.z) ** 2 < av.r * av.r)) continue;
+                const h = heightAt(x, z);
+                if (h < minH) continue;
+                if (slopeAt(x, z) > maxSlope) continue;
+                pts.push({ x, y: h, z, rx: rng(), ry: rng() * Math.PI * 2, rz: rng() });
+            }
         }
         return pts;
     }
 
-    function buildTrees(cfg, avoid) {
-        const rng = mulberry32(cfg.seed * 7919 + 13);
-        const count = Math.max(0, Math.min(cfg.trees, 600));
-        const treeLine = cfg.height * 0.72;
-        const pts = scatterPositions(cfg, count, cfg.waterLevel + 0.8, treeLine, 0.85, rng, avoid);
+    // 生成每个模型的所有摆放（世界矩阵 + 影子参数）
+    function buildPlacements() {
+        const rng = mulberry32(CFG.seed + 9);
+        const avoid = [{ x: V.x, z: V.z, r: 24 }, { x: CFG.lake.x, z: CFG.lake.z, r: CFG.lake.r * 0.95 }];
+        const P = {}; // model -> [{pos, ry, s}]
+        const put = (model, x, y, z, ry = 0, s = 1) => {
+            (P[model] = P[model] || []).push({ x, y, z, ry, s });
+        };
 
+        // 木地板广场 + 石板道路
+        const tiles = villageTiles();
+        for (const [i, j, ry] of tiles.plaza) put('planks', V.x + i, V.y + 0.04, V.z + j, ry);
+        for (const [i, j, ry] of tiles.roads) put('road', V.x + i, V.y + 0.04, V.z + j, ry);
+        // 房屋
+        for (const h of houses) put(h.model, V.x + h.x, V.y, V.z + h.z, h.ry);
+        // 喷泉
+        put('fountain-round', V.x, V.y + 0.04, V.z, 0);
+        // 道具与灯笼
+        for (const p of props) put(p.model, V.x + p.x, V.y, V.z + p.z, p.ry);
+        for (let k = 5; k <= 9; k += 2) {
+            put('lantern', V.x - 1.4, V.y, V.z - k, 0);
+            put('lantern', V.x + 1.4, V.y, V.z - k, 0);
+        }
+        // 广场角落花坛 + 村口栅栏
+        for (const [hx, hz, ry] of [[-6.2, -6.2, 0], [6.2, -6.2, 0], [6.2, 6.2, 0], [-6.2, 6.2, 0]]) {
+            put('hedge-large', V.x + hx, V.y, V.z + hz, ry);
+        }
+        for (let i = -12; i <= 12; i += 6) {
+            put('fence', V.x + i, V.y, V.z + 14, Math.PI);
+            put('fence', V.x + i, V.y, V.z - 14, 0);
+        }
+        // 水车（湖边）
+        put('watermill', CFG.lake.x + CFG.lake.r * 0.92, CFG.waterLevel + 0.9, CFG.lake.z + 14, -0.6);
+        // 码头
+        for (let k = 0; k < 4; k++) put('planks', CFG.lake.x + CFG.lake.r * 0.86, CFG.waterLevel + 0.15, CFG.lake.z + 8 + k, 0);
+
+        // 树木（树丛）
+        const treeNames = ['tree-high', 'tree', 'tree-high-crooked'];
+        const tp = groves(mulberry32(CFG.seed + 21), {
+            groves: 70, perGrove: 14, region: { x: 0, z: 0, r: 210 }, avoid, spread: 15
+        });
+        tp.forEach((p, i) => {
+            if (Q.trees < 1 && (i % Math.round(1 / Q.trees))) return;
+            put(treeNames[(p.rx * treeNames.length) | 0], p.x, p.y - 0.1, p.z, p.ry, 0.7 + p.rz * 0.8);
+        });
+        // 岩石
+        const rockNames = ['rock-large', 'rock-small', 'rock-wide'];
+        const rp = scatter(mulberry32(CFG.seed + 33), 60, {
+            minH: CFG.waterLevel - 0.5, maxSlope: 3, region: { x: 0, z: 0, r: 200 }, avoid
+        });
+        rp.forEach((p, i) => {
+            if (Q.rocks < 1 && (i % Math.round(1 / Q.rocks))) return;
+            put(rockNames[(p.rx * rockNames.length) | 0], p.x, p.y - 0.25, p.z, p.ry, 0.9 + p.rz * 1.4);
+        });
+        return P;
+    }
+
+    // ===================================================================
+    // 模型加载 + 实例化
+    // ===================================================================
+    const MODELS = {
+        'fantasy-town': ['tree', 'tree-high', 'tree-high-crooked', 'rock-large', 'rock-small', 'rock-wide',
+            'hedge-large', 'fence', 'lantern', 'road', 'fountain-round', 'cart', 'stall', 'pillar-wood', 'planks', 'watermill'],
+        'modular-buildings': ['building-sample-house-a', 'building-sample-house-b', 'building-sample-house-c']
+    };
+
+    function flatten(root) {
+        const parts = [];
+        root.updateMatrixWorld(true);
+        root.traverse(o => { if (o.isMesh) parts.push({ geometry: o.geometry, material: o.material, local: o.matrixWorld.clone() }); });
+        return parts;
+    }
+
+    function makeInstanced(parts, placements, castShadow) {
         const group = new THREE.Group();
-        group.name = 'Trees';
-
-        // 一半松树（双层塔形），一半阔叶树（球形树冠）
-        const pineCount = Math.ceil(pts.length * 0.6);
-        const oakCount = pts.length - pineCount;
-
-        const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
-        const p = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
-        const place = (i, x, h, z, scale, rng) => {
-            p.set(x, h - 0.15, z);
-            q.setFromAxisAngle(up, rng() * Math.PI * 2);
-            s.setScalar(scale);
-            m.compose(p, q, s);
-        };
-
-        // —— 松树：树干 + 三层塔形针叶（Terrain3D 演示里的经典杉树感） ——
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5d4126, roughness: 0.9 });
-        const pineTrunkGeo = new THREE.CylinderGeometry(0.12, 0.2, 1.2, 6);
-        pineTrunkGeo.translate(0, 0.6, 0);
-        const pineTrunks = new THREE.InstancedMesh(pineTrunkGeo, trunkMat, Math.max(pineCount, 1));
-
-        const coneShape = (r, h) => {
-            const g = new THREE.ConeGeometry(r, h, 8);
-            return g;
-        };
-        const layerDefs = [
-            { r: 1.25, h: 1.6, y: 1.7 },
-            { r: 0.95, h: 1.4, y: 2.7 },
-            { r: 0.6, h: 1.3, y: 3.6 }
-        ];
-        const pineMat = new THREE.MeshStandardMaterial({ roughness: 0.85 });
-        const pineLayers = layerDefs.map(d => {
-            const g = coneShape(d.r, d.h);
-            g.translate(0, d.y, 0);
-            return new THREE.InstancedMesh(g, pineMat, Math.max(pineCount, 1));
-        });
-
-        const pineC1 = new THREE.Color(0x1e4420), pineC2 = new THREE.Color(0x3d6b32), col = new THREE.Color();
-        pts.slice(0, pineCount).forEach(([x, h, z], i) => {
-            const scale = 0.9 + rng() * 1.1;
-            place(i, x, h, z, scale, rng);
-            pineTrunks.setMatrixAt(i, m);
-            pineLayers.forEach(l => {
-                l.setMatrixAt(i, m);
-                l.setColorAt(i, col.copy(pineC1).lerp(pineC2, rng()));
+        const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+        const up = new THREE.Vector3(0, 1, 0);
+        for (const part of parts) {
+            const im = new THREE.InstancedMesh(part.geometry, part.material, placements.length);
+            placements.forEach((pl, i) => {
+                p.set(pl.x, pl.y, pl.z);
+                q.setFromAxisAngle(up, pl.ry);
+                s.setScalar(pl.s);
+                m.compose(p, q, s);
+                m.multiply(part.local);
+                im.setMatrixAt(i, m);
             });
-        });
-        pineTrunks.count = pineCount;
-        pineLayers.forEach(l => l.count = pineCount);
-
-        // —— 阔叶树：较粗的树干 + 多球状树冠 ——
-        const oakTrunkGeo = new THREE.CylinderGeometry(0.18, 0.3, 1.8, 6);
-        oakTrunkGeo.translate(0, 0.9, 0);
-        const oakTrunks = new THREE.InstancedMesh(oakTrunkGeo, trunkMat, Math.max(oakCount, 1));
-
-        const canopyGeo = new THREE.IcosahedronGeometry(1.5, 1);
-        canopyGeo.translate(0, 2.6, 0);
-        const oakMat = new THREE.MeshStandardMaterial({ roughness: 0.85, flatShading: true });
-        const oakCrowns = new THREE.InstancedMesh(canopyGeo, oakMat, Math.max(oakCount, 1));
-
-        const oakC1 = new THREE.Color(0x4c7a2e), oakC2 = new THREE.Color(0x84a83f);
-        pts.slice(pineCount).forEach(([x, h, z], i) => {
-            const scale = 0.85 + rng() * 0.9;
-            place(i, x, h, z, scale, rng);
-            oakTrunks.setMatrixAt(i, m);
-            oakCrowns.setMatrixAt(i, m);
-            oakCrowns.setColorAt(i, col.copy(oakC1).lerp(oakC2, rng()));
-        });
-        oakTrunks.count = oakCount;
-        oakCrowns.count = oakCount;
-
-        [pineTrunks, oakTrunks, ...pineLayers, oakCrowns].forEach(im => {
-            im.castShadow = true;
+            im.instanceMatrix.needsUpdate = true;
+            im.castShadow = castShadow;
+            im.receiveShadow = castShadow;
             group.add(im);
-        });
-        return group;
-    }
-
-    // ========== 灌木 与 花丛 ==========
-    function buildBushesAndFlowers(cfg, terrainBuilt, avoid) {
-        const rng = mulberry32(cfg.seed * 27183 + 77);
-        const group = new THREE.Group();
-        group.name = 'BushesAndFlowers';
-
-        const bushCount = Math.max(0, Math.min(cfg.bushes, 300));
-        const pts = scatterPositions(cfg, bushCount, cfg.waterLevel + 0.4, cfg.height * 0.6, 0.9, rng, avoid);
-        if (pts.length) {
-            const geo = new THREE.IcosahedronGeometry(0.7, 1);
-            geo.translate(0, 0.3, 0);
-            const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
-            const bushes = new THREE.InstancedMesh(geo, mat, pts.length);
-            const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-            const up = new THREE.Vector3(0, 1, 0);
-            const c1 = new THREE.Color(0x3f6d2c), c2 = new THREE.Color(0x5f8a3a), col = new THREE.Color();
-            pts.forEach(([x, h, z], i) => {
-                p.set(x, h - 0.15, z);
-                q.setFromAxisAngle(up, rng() * Math.PI * 2);
-                s.set(0.6 + rng() * 0.8, 0.45 + rng() * 0.5, 0.6 + rng() * 0.8);
-                m.compose(p, q, s);
-                bushes.setMatrixAt(i, m);
-                bushes.setColorAt(i, col.copy(c1).lerp(c2, rng()));
-            });
-            bushes.castShadow = true;
-            group.add(bushes);
-        }
-
-        // 小野花：草地上随机点缀的彩色小球
-        const flowerCount = Math.max(0, cfg.flowers || 80);
-        const fpts = scatterPositions(cfg, flowerCount, cfg.waterLevel + 0.5, cfg.height * 0.45, 0.55, rng, avoid);
-        if (fpts.length) {
-            const geo = new THREE.SphereGeometry(0.12, 6, 5);
-            geo.translate(0, 0.18, 0);
-            const mat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
-            const flowers = new THREE.InstancedMesh(geo, mat, fpts.length);
-            const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-            const palette = [0xffd54a, 0xffffff, 0xff7fa3, 0xc792ea, 0xff9d5c].map(c => new THREE.Color(c));
-            fpts.forEach(([x, h, z], i) => {
-                p.set(x, h, z);
-                q.identity();
-                s.set(1, 0.8 + rng() * 1.4, 1);
-                m.compose(p, q, s);
-                flowers.setMatrixAt(i, m);
-                flowers.setColorAt(i, palette[(rng() * palette.length) | 0]);
-            });
-            group.add(flowers);
         }
         return group;
     }
 
-    // ========== 西洋小屋 ==========
-    function findFlatSpot(cfg, avoidRandom) {
-        // 找一块离水面不远、坡度最小的平地盖房子
-        const rng = mulberry32(cfg.seed * 61357 + 3);
-        let best = null, bestScore = -1e9;
-        for (let i = 0; i < 400; i++) {
-            const r = cfg.size * (0.16 + rng() * 0.2);
-            const a = rng() * Math.PI * 2;
-            const x = Math.cos(a) * r, z = Math.sin(a) * r;
-            const h = terrainHeightAt(x, z);
-            if (h < cfg.waterLevel + 1.2 || h > cfg.height * 0.42) continue;
-            const sl = slopeAt(x, z);
-            const score = -sl * 10 - Math.abs(h - cfg.waterLevel - 3) * 0.5;
-            if (score > bestScore) { bestScore = score; best = [x, h, z]; }
+    async function loadModels() {
+        const manager = new THREE.LoadingManager();
+        let total = 0, loaded = 0;
+        manager.onStart = (u, n) => { total = n; };
+        manager.onProgress = (u, n, t) => { loaded = n; total = t; setProgress(`加载模型 ${n}/${t}...`); };
+        const loader = new GLTFLoader(manager);
+        const scenes = {};
+        const names = [];
+        for (const kit in MODELS) for (const n of MODELS[kit]) names.push([kit, n]);
+        let done = 0;
+        await Promise.all(names.map(async ([kit, n]) => {
+            const g = await loader.loadAsync(`${ASSETS}/models/${kit}/${n}.glb`);
+            scenes[n] = g.scene;
+            done++;
+            setProgress(`加载模型 ${done}/${names.length}...`);
+            return g;
+        }));
+        // 同一 kit 的 colormap 共享一张纹理，省显存
+        for (const kit in MODELS) {
+            let shared = null;
+            for (const n of MODELS[kit]) {
+                scenes[n].traverse(o => {
+                    if (o.isMesh && o.material && o.material.map) {
+                        if (!shared) shared = o.material.map;
+                        else o.material.map = shared;
+                        o.material.roughness = 0.92;
+                        o.material.metalness = 0;
+                    }
+                });
+            }
         }
-        return best || [cfg.size * 0.2, terrainHeightAt(cfg.size * 0.2, 0), 0];
+        return scenes;
     }
 
-    function buildHouse(cfg) {
-        const g = new THREE.Group();
-        g.name = 'House';
-
-        const wood = new THREE.MeshStandardMaterial({ color: 0xb08a5a, roughness: 0.8 });
-        const plaster = new THREE.MeshStandardMaterial({ color: 0xf1e7d0, roughness: 0.9 });
-        const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a4a3a, roughness: 0.75 });
-        const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8d857a, roughness: 0.95 });
-        const darkWood = new THREE.MeshStandardMaterial({ color: 0x5a4030, roughness: 0.85 });
-        const glow = new THREE.MeshStandardMaterial({
-            color: 0xffdf8a, emissive: 0xffc966, emissiveIntensity: 0.9
-        });
-
-        // 石头基座
-        addBox(g, stoneMat, 7.6, 1.0, 6.4, 0, 0.0, 0);
-        // 一层墙体（木框架 + 白色墙面）
-        addBox(g, plaster, 7, 2.6, 6, 0, 1.8, 0);
-        // 木梁装饰（西洋木骨风格）
-        addBox(g, darkWood, 7.15, 0.25, 6.1, 0, 3.05, 0);
-        addBox(g, darkWood, 7.15, 0.25, 6.1, 0, 0.65, 0);
-        addBox(g, darkWood, 0.25, 2.6, 6.12, -2.4, 1.8, 0);
-        addBox(g, darkWood, 0.25, 2.6, 6.12, 2.4, 1.8, 0);
-        // 二层阁楼（稍窄）
-        addBox(g, plaster, 5.6, 2.0, 4.8, 0, 4.3, 0);
-
-        // 双坡屋顶：三棱柱
-        const roof = new THREE.Mesh(makeGableRoof(6.8, 2.6, 5.8), roofMat);
-        roof.position.y = 5.3;
-        roof.castShadow = true;
-        g.add(roof);
-
-        // 烟囱
-        addBox(g, stoneMat, 0.8, 2.2, 0.8, 1.8, 6.2, -1.2);
-        addBox(g, darkWood, 1.0, 0.25, 1.0, 1.8, 7.3, -1.2);
-
-        // 门 与 台阶
-        addBox(g, darkWood, 1.1, 2.1, 0.15, 0, 1.55, 3.02);
-        addBox(g, stoneMat, 1.6, 0.35, 1.0, 0, 0.35, 3.55);
-
-        // 发光窗户（正面两扇 + 二层圆窗）
-        addBox(g, glow, 1.0, 1.1, 0.12, -2.1, 2.0, 3.02);
-        addBox(g, glow, 1.0, 1.1, 0.12, 2.1, 2.0, 3.02);
-        addBox(g, darkWood, 1.15, 0.12, 0.16, -2.1, 2.0, 3.04);
-        addBox(g, darkWood, 1.15, 0.12, 0.16, 2.1, 2.0, 3.04);
-        addBox(g, darkWood, 0.12, 1.2, 0.16, -2.1, 2.0, 3.04);
-        addBox(g, darkWood, 0.12, 1.2, 0.16, 2.1, 2.0, 3.04);
-        const roundWin = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.14, 20).rotateX(Math.PI / 2), glow);
-        roundWin.position.set(0, 4.6, 2.42);
-        g.add(roundWin);
-
-        // 侧面窗
-        addBox(g, glow, 0.12, 1.1, 1.0, 3.52, 2.0, 0);
-        addBox(g, glow, 0.12, 1.1, 1.0, -3.52, 2.0, 0);
-
-        // 门前小栅栏
-        const fenceMat = darkWood;
-        for (let i = -4; i <= 4; i++) {
-            if (Math.abs(i) < 1) continue; // 门口留空
-            addBox(g, fenceMat, 0.12, 0.9, 0.12, i * 0.7, 0.45, 4.6);
-        }
-        addBox(g, fenceMat, 6.3, 0.1, 0.1, 0, 0.78, 4.6);
-
-        // 暖光：窗户透出的光
-        const lamp = new THREE.PointLight(0xffc966, 12, 16, 2);
-        lamp.position.set(0, 2.4, 3.8);
-        g.add(lamp);
-
-        // 落在平地上
-        const [hx, hy, hz] = findFlatSpot(cfg);
-        g.position.set(hx, hy - 0.25, hz);
-        g.rotation.y = Math.atan2(hx, hz) + Math.PI; // 门朝向山谷中心
-        g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-        roundWin.castShadow = false;
-        return { group: g, pos: [hx, hz] };
-    }
-
-    function addBox(group, mat, w, h, d, x, y, z) {
-        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-        mesh.position.set(x, y + h / 2, z);
-        group.add(mesh);
-        return mesh;
-    }
-
-    function makeGableRoof(baseW, roofH, depth) {
-        // 三角棱柱（脊线沿 Z 轴）
-        const hw = baseW / 2, hd = depth / 2;
-        const vertices = new Float32Array([
-            // 两个三角形端面
-            -hw, 0, hd,  hw, 0, hd,  0, roofH, hd,
-            hw, 0, -hd,  -hw, 0, -hd,  0, roofH, -hd,
-        ]);
-        const geo = new THREE.BufferGeometry();
-        const verts = [];
-        // 端面
-        for (let i = 0; i < vertices.length; i += 3) verts.push(vertices[i], vertices[i+1], vertices[i+2]);
-        // 两个正面斜坡
-        const A=[-hw,0,hd], B=[hw,0,hd], Ap=[-hw,0,-hd], Bp=[hw,0,-hd], R=[0,roofH,hd], Rp=[0,roofH,-hd];
-        function quad(a,b,c,d){ verts.push(...a,...b,...c, ...a,...c,...d); }
-        quad(A,R,Rp,Ap);   // 左坡
-        quad(R,B,Bp,Rp);   // 右坡
-        quad(A,Ap,Bp,B);   // 底面（可选）
-        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3));
-        geo.computeVertexNormals();
-        return geo;
-    }
-
-    // ========== 云朵 ==========
-    function buildClouds(cfg) {
-        const rng = mulberry32(cfg.seed * 1877 + 5);
-        const count = Math.max(0, Math.min(cfg.clouds, 30));
-        const group = new THREE.Group();
-        group.name = 'Clouds';
-        const mat = new THREE.MeshStandardMaterial({
-            color: 0xffffff, roughness: 1, transparent: true, opacity: 0.88, flatShading: true
-        });
-        const puffGeo = new THREE.IcosahedronGeometry(1, 1);
-        const drift = [];
-        for (let i = 0; i < count; i++) {
-            const cloud = new THREE.Group();
-            const puffs = 3 + (rng() * 3 | 0);
-            for (let j = 0; j < puffs; j++) {
-                const puff = new THREE.Mesh(puffGeo, mat);
-                puff.position.set((rng() - 0.5) * 7, (rng() - 0.5) * 1.6, (rng() - 0.5) * 4);
-                const s = 2 + rng() * 2.6;
-                puff.scale.set(s * (0.9 + rng() * 0.5), s * 0.55, s * (0.7 + rng() * 0.4));
-                cloud.add(puff);
-            }
-            const r = cfg.size * (0.25 + rng() * 0.55);
-            const a = rng() * Math.PI * 2;
-            cloud.position.set(Math.cos(a) * r, cfg.height * 1.6 + rng() * cfg.height * 0.9, Math.sin(a) * r);
-            drift.push({ cloud, speed: 0.5 + rng() * 0.8 });
-            group.add(cloud);
-        }
-        group.userData.drift = drift;
-        return group;
-    }
-
-    function buildRocks(cfg) {
-        const rng = mulberry32(cfg.seed * 104729 + 31);
-        const count = Math.max(0, Math.min(cfg.rocks, 400));
-        const pts = scatterPositions(cfg, count, cfg.waterLevel - 0.5, cfg.height * 0.9, 2.5, rng);
-
-        const geo = new THREE.DodecahedronGeometry(1, 0);
-        const mat = new THREE.MeshStandardMaterial({ roughness: 0.92 });
-        const rocks = new THREE.InstancedMesh(geo, mat, pts.length);
-        rocks.name = 'Rocks';
-
-        const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
-        const p = new THREE.Vector3(), euler = new THREE.Euler();
-        const c1 = new THREE.Color(0x8a867c), c2 = new THREE.Color(0x5f5b52), col = new THREE.Color();
-        pts.forEach(([x, h, z], i) => {
-            const scale = 0.3 + rng() * 1.1;
-            p.set(x, h - scale * 0.35, z);
-            euler.set(rng() * 0.6, rng() * Math.PI * 2, rng() * 0.6);
-            q.setFromEuler(euler);
-            s.set(scale * (0.7 + rng() * 0.6), scale * (0.5 + rng() * 0.5), scale * (0.7 + rng() * 0.6));
-            m.compose(p, q, s);
-            rocks.setMatrixAt(i, m);
-            rocks.setColorAt(i, col.copy(c1).lerp(c2, rng()));
-        });
-        rocks.castShadow = true;
-        rocks.receiveShadow = true;
-        return rocks;
-    }
-
-    // ========== tscn 中的额外节点（灯光 / 简单网格） ==========
-    function meshGeometryFromSub(sub) {
-        if (!sub) return null;
-        const p = sub.props;
-        switch (sub.type) {
-            case 'PlaneMesh': {
-                const n = parseVec(p['size'] || '1, 1');
-                return new THREE.PlaneGeometry(n[0] || 1, n[1] || 1).rotateX(-Math.PI / 2);
-            }
-            case 'BoxMesh': {
-                const n = parseVec(p['size'] || '1, 1, 1');
-                return new THREE.BoxGeometry(n[0] || 1, n[1] || 1, n[2] || 1);
-            }
-            case 'SphereMesh': {
-                const r = parseVec(p['radius'] || '0.5')[0] || 0.5;
-                return new THREE.SphereGeometry(r, 32, 24);
-            }
-            case 'CapsuleMesh': {
-                const r = parseVec(p['radius'] || '0.5')[0] || 0.5;
-                const h = parseVec(p['height'] || '2')[0] || 2;
-                return new THREE.CapsuleGeometry(r, Math.max(0.01, h - 2 * r), 8, 16);
-            }
-            case 'CylinderMesh': {
-                const t = parseVec(p['top_radius'] || '0.5')[0] || 0.5;
-                const b = parseVec(p['bottom_radius'] || '0.5')[0] || 0.5;
-                const h = parseVec(p['height'] || '2')[0] || 2;
-                return new THREE.CylinderGeometry(t, b, h, 24);
-            }
-            default: return null;
-        }
-    }
-
-    // ========== 加载并组装场景 ==========
-    let controls = null;
-    let water = null;
-    let clouds = null;
-    let housePos = null;
-    let clock = null;
-
-    function sunDirFrom(node) {
-        const dir = new THREE.Vector3(0.6, 0.7, 0.55);
-        if (node && node.props['transform']) {
-            const holder = new THREE.Object3D();
-            applyTransform(holder, node.props['transform']);
-            // Godot 平行光朝本地 -Z 照射
-            dir.set(0, 0, -1).applyQuaternion(holder.quaternion).multiplyScalar(-1);
-        }
-        if (dir.y < 0.15) dir.y = 0.15;
-        return dir.normalize();
-    }
+    // ===================================================================
+    // 组装
+    // ===================================================================
+    let controls = null, clock = null, frames = 0, frameTimeSum = 0, degraded = false;
 
     async function init() {
-        setStatus('加载场景...', 'loading');
+        setProgress('加载地形数据...');
+        const hmSource = await loadHeightmap();
+        console.log('heightmap source:', hmSource);
 
-        let parsed = null;
-        try {
-            const res = await fetch(TSCN_URL + '?t=' + Date.now());
-            if (res.ok) {
-                parsed = parseTscn(await res.text());
-            }
-        } catch (e) {
-            console.error('加载失败:', e);
+        setProgress('加载模型...');
+        const scenes = await loadModels();
+
+        setProgress('生成场景...');
+        addSky();
+        addLights();
+        scene.fog = new THREE.Fog(SKY_HORIZON, 150, 460);
+
+        const terrain = buildTerrain();
+        scene.add(terrain);
+        scene.add(buildWater());
+
+        const placements = buildPlacements();
+        const objectRoot = new THREE.Group();
+        objectRoot.name = 'Objects';
+        let drawGroups = 0;
+        for (const name in placements) {
+            const root = scenes[name];
+            if (!root) continue;
+            const parts = flatten(root);
+            const cast = Q.shadows && !/^(road|planks)$/.test(name);
+            objectRoot.add(makeInstanced(parts, placements[name], cast));
+            drawGroups++;
         }
+        scene.add(objectRoot);
+        console.log('instanced groups:', drawGroups);
 
-        // 从 tscn 中取参数，失败则用默认值
-        const terrainNode = parsed && parsed.nodes.find(n => n.name === 'Terrain');
-        const skySub = parsed && Object.values(parsed.subResources).find(s => s.type === 'ProceduralSkyMaterial');
-        const lightNode = parsed && parsed.nodes.find(n => n.type === 'DirectionalLight3D');
-
-        const cfg = {
-            seed: metaNum(terrainNode, 'seed', 42),
-            size: metaNum(terrainNode, 'size', 240),
-            height: metaNum(terrainNode, 'height', 26),
-            waterLevel: metaNum(terrainNode, 'water_level', 1.2),
-            trees: metaNum(terrainNode, 'trees', 160),
-            rocks: metaNum(terrainNode, 'rocks', 70),
-            bushes: metaNum(terrainNode, 'bushes', 60),
-            flowers: metaNum(terrainNode, 'flowers', 80),
-            clouds: metaNum(terrainNode, 'clouds', 9),
-            house: metaNum(terrainNode, 'house', 1)
-        };
-
-        let skyTop = 0x3875d1, skyHorizon = 0xb8d1eb;
-        if (skySub) {
-            const t = parseVec(skySub.props['sky_top_color'] || '');
-            const h = parseVec(skySub.props['sky_horizon_color'] || '');
-            if (t.length >= 3) skyTop = new THREE.Color(t[0], t[1], t[2]).getHex();
-            if (h.length >= 3) skyHorizon = new THREE.Color(h[0], h[1], h[2]).getHex();
-        }
-
-        const sunDir = sunDirFrom(lightNode);
-
-        // 天空 + 雾
-        scene.add(makeSky(skyTop, skyHorizon, sunDir));
-        scene.fog = new THREE.Fog(skyHorizon, cfg.size * 0.55, cfg.size * 1.4);
-        scene.add(new THREE.HemisphereLight(0xcfe0f2, 0x3d4a38, 0.75));
-
-        // 太阳
-        const sun = new THREE.DirectionalLight(0xfff2dd, 2.4);
-        sun.position.copy(sunDir).multiplyScalar(cfg.size * 0.6);
-        sun.castShadow = true;
-        const sc = cfg.size * 0.45;
-        sun.shadow.camera.left = -sc; sun.shadow.camera.right = sc;
-        sun.shadow.camera.top = sc; sun.shadow.camera.bottom = -sc;
-        sun.shadow.camera.far = cfg.size * 2.5;
-        sun.shadow.mapSize.set(2048, 2048);
-        sun.shadow.bias = -0.0004;
-        scene.add(sun, sun.target);
-
-        // 地形 / 水面
-        scene.add(buildTerrain(cfg));
-        water = buildWater(cfg);
-        scene.add(water);
-
-        // 先盖房子，拿到位置后植被避开它
-        const avoid = [];
-        if (cfg.house) {
-            const house = buildHouse(cfg);
-            scene.add(house.group);
-            avoid.push([house.pos[0], house.pos[1], 9]);
-            housePos = house.pos;
-        }
-        scene.add(buildTrees(cfg, avoid));
-        scene.add(buildRocks(cfg));
-        scene.add(buildBushesAndFlowers(cfg, true, avoid));
-        clouds = buildClouds(cfg);
-        scene.add(clouds);
-
-        // tscn 中其余的简单节点（如 Player 胶囊、点光源）
-        if (parsed) {
-            for (const node of parsed.nodes) {
-                if (['Main', 'Terrain', 'WorldEnvironment'].includes(node.name)) continue;
-                if (node.parent !== '.' && !/Player/.test(node.parent)) continue;
-                if (node.type === 'MeshInstance3D') {
-                    const m = node.props['mesh'] && node.props['mesh'].match(/SubResource\("(.+?)"\)/);
-                    const geo = meshGeometryFromSub(m ? parsed.subResources[m[1]] : null);
-                    if (geo) {
-                        const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xd05a4e, roughness: 0.6 }));
-                        const holder = new THREE.Object3D();
-                        const parentNode = parsed.nodes.find(n => n.name === node.parent.split('/').pop());
-                        if (parentNode && parentNode.props['transform']) {
-                            applyTransform(holder, parentNode.props['transform']);
-                            const groundY = terrainHeightAt(holder.position.x, holder.position.z);
-                            holder.position.y = Math.max(holder.position.y, groundY);
-                        }
-                        mesh.castShadow = true;
-                        holder.add(mesh);
-                        scene.add(holder);
-                    }
-                } else if (node.type === 'OmniLight3D') {
-                    const holder = new THREE.Object3D();
-                    if (node.props['transform']) applyTransform(holder, node.props['transform']);
-                    const e = parseVec(node.props['light_energy'] || '1')[0] || 1;
-                    holder.add(new THREE.PointLight(0xffffff, e * 30, 40));
-                    scene.add(holder);
-                }
-            }
-        }
-
-        // 取景：从高处看向山谷
-        const cx = 0, cz = 0;
-        const cy = terrainHeightAt(cx, cz);
-        const px = cfg.size * 0.32, pz = cfg.size * 0.3;
-        camera.position.set(px, Math.max(terrainHeightAt(px, pz) + 14, cfg.height * 0.75), pz);
+        // 相机与交互
+        const c = new THREE.Vector3(V.x, V.y + 3, V.z);
+        camera.position.set(V.x + 36, V.y + 21, V.z + 44);
         controls = new OrbitControls(camera, canvas);
-        controls.target.set(cx, cy + 4, cz);
+        controls.target.copy(c);
         controls.enableDamping = true;
         controls.dampingFactor = 0.08;
-        controls.maxDistance = cfg.size * 1.2;
-        controls.minDistance = 2;
+        controls.minDistance = 12;
+        controls.maxDistance = 320;
         controls.maxPolarAngle = Math.PI * 0.495;
         controls.autoRotate = true;
-        controls.autoRotateSpeed = 0.5;
+        controls.autoRotateSpeed = 0.35;
         ['pointerdown', 'wheel', 'touchstart'].forEach(ev =>
             canvas.addEventListener(ev, () => { controls.autoRotate = false; }, { once: true, passive: true })
         );
@@ -872,29 +605,39 @@
         clock = new THREE.Clock();
         cover.style.display = 'none';
         setStatus('场景加载成功', 'ready');
-        animate();
+        globalThis.__scene = scene;
+        globalThis.__ready = true;
+        requestAnimationFrame(animate);
     }
 
     function animate() {
         requestAnimationFrame(animate);
         const dt = clock ? Math.min(clock.getDelta(), 0.1) : 0;
-        const t = clock ? clock.elapsedTime : 0;
-        if (water) water.position.y += Math.sin(t * 0.8) * 0.0015;
-        if (clouds) {
-            for (const { cloud, speed } of clouds.userData.drift) {
-                cloud.position.x += speed * dt;
-                if (cloud.position.x > 500) cloud.position.x = -500;
-            }
-        }
         if (controls) controls.update();
         renderer.render(scene, camera);
+        // 简易自动降级：连续帧率过低时关阴影、降像素比
+        if (!degraded && controls) {
+            frames++; frameTimeSum += dt;
+            if (frames === 90) {
+                const avg = frameTimeSum / frames * 1000;
+                if (avg > 34) {
+                    degraded = true;
+                    if (renderer.shadowMap.enabled) { renderer.shadowMap.enabled = false; if (sun) sun.castShadow = false; }
+                    renderer.setPixelRatio(Math.min(Q.pixelRatio, 1));
+                    setStatus('已自动降低画质', 'ready');
+                } else { frames = 0; frameTimeSum = 0; }
+            }
+        }
     }
 
-    init().catch(err => {
-        console.error(err);
-        setStatus('加载失败: ' + err.message, 'error');
-        cover.querySelector('.spinner').style.display = 'none';
+    qualityEl.addEventListener('click', () => {
+        tier = tier === 'low' ? 'high' : 'low';
+        const url = new URL(location.href);
+        url.searchParams.set('q', tier);
+        location.href = url.toString();
     });
+
+    init().catch(showError);
     </script>
 </body>
 </html>

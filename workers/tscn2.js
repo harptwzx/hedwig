@@ -10,19 +10,26 @@ const contentTypes = {
     '.html': 'text/html; charset=utf-8',
     '.css': 'text/css; charset=utf-8',
     '.js': 'application/javascript; charset=utf-8',
+    '.mjs': 'application/javascript; charset=utf-8',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
     '.svg': 'image/svg+xml',
     '.ico': 'image/x-icon',
-    '.json': 'application/json; charset=utf-8'
+    '.json': 'application/json; charset=utf-8',
+    '.glb': 'model/gltf-binary',
+    '.gltf': 'model/gltf+json',
+    '.bin': 'application/octet-stream'
 };
 
 function getContentType(path) {
-    for (const ext in contentTypes) {
-        if (path.endsWith(ext)) return contentTypes[ext];
-    }
-    return 'application/octet-stream';
+    const dot = path.lastIndexOf('.');
+    const ext = dot >= 0 ? path.slice(dot).toLowerCase() : '';
+    return contentTypes[ext] || 'application/octet-stream';
 }
+
+const textExts = new Set(['.html', '.css', '.js', '.mjs', '.svg', '.json', '.gltf']);
 
 async function serveStaticFile(path) {
     const url = `https://raw.githubusercontent.com/${CONFIG.owner}/${CONFIG.repo}/main/public${path}`;
@@ -31,11 +38,12 @@ async function serveStaticFile(path) {
             headers: { 'User-Agent': 'Hedwig-Worker' }
         });
         if (response.ok) {
-            const content = await response.text();
-            return new Response(content, {
+            const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
+            const body = textExts.has(ext) ? await response.text() : await response.arrayBuffer();
+            return new Response(body, {
                 headers: {
                     'Content-Type': getContentType(path),
-                    'Cache-Control': 'public, max-age=60'
+                    'Cache-Control': 'public, max-age=300'
                 }
             });
         }

@@ -22,31 +22,39 @@
 - `wrangler.toml`：新增 `BROWSER` 绑定 + `TSCN_SESSION` Durable Object
 - `tscn/godot/main.tscn`：场景源文件，渲染页实时从 GitHub 拉取解析
 
-## /tscn2：地形场景查看器（纯前端）
+## /tscn2：湖畔村庄（纯前端）
 
-`hedwig.eu.org/tscn2` 是免服务器的 3D 查看器，浏览器直接用 Three.js 渲染
-`tscn/godot/terrain.tscn`，风格模仿 Terrain3D 演示场景：程序化山地（草/岩/雪
-自动分色）、湖泊水面、随机散布的树木与岩石、渐变天空 + 太阳。打开页面先自动
-环绕浏览，鼠标操作后接管。
+`hedwig.eu.org/tscn2` 是免服务器的 3D 场景，浏览器直接用 Three.js 渲染，
+**不需要** Cloudflare 无头浏览器。场景为**风格化低多边形**（美术风格统一）：
 
-地形参数写在 `terrain.tscn` 中 `Terrain` 节点的 metadata 里，改数值提交即可：
+- 地形：程序化湖光山色（湖泊 + 沙岸 + 远山雪顶 + 起伏丘陵），
+  高度场预生成为**二进制文件** `public/tscn2/assets/terrain.bin`（256×256 Uint16，128KB）
+- 村庄：木地板广场 + 喷泉 + 石板路 + 4 栋房屋（Kenney Modular Buildings）
+- 植被与道具：Kenney Fantasy Town（CC0）——针叶树/岩石/花坛/栅栏/路灯/马车/货摊/湖边水车
+- 天空渐变 + 太阳光晕、软阴影、雾效
 
-| metadata | 说明 | 默认 |
-|---|---|---|
-| `seed` | 随机种子（决定山体与植被分布） | 42 |
-| `size` | 地形边长（米） | 240 |
-| `height` | 山体高度 | 26 |
-| `water_level` | 水面高度 | 1.2 |
-| `trees` | 树木数量（松树/阔叶混种） | 160 |
-| `rocks` | 岩石数量 | 70 |
-| `bushes` / `flowers` | 灌木 / 野花数量 | 60 / 80 |
-| `house` | 是否生成度假小屋（0/1） | 1 |
-| `clouds` | 云朵数量 | 9 |
+> 模型来自 [Kenney.nl](https://kenney.nl)（CC0 公共领域，可自由商用，无需署名）。
 
-小屋会自动寻找湖边平地落座，门口朝向山谷，带发光窗户、烟囱和栅栏。
+### 性能设计（面向低性能设备）
 
-场景中额外的 `MeshInstance3D`、`OmniLight3D`、`Player` 节点也会被解析渲染
-（自动吸附到地形表面）。天空颜色取自 `ProceduralSkyMaterial` 子资源。
+| 手段 | 说明 |
+|---|---|
+| 实例化 | 所有树/岩石/道路/栅栏等同模型合并为 `InstancedMesh`，全场景仅 ~26 次绘制调用 |
+| 二进制高度图 | 页面优先加载 `terrain.bin`（客户端不跑噪声），失败自动回退到内置噪声 |
+| 画质分级 | 自动判断手机/小屏 → 低画质；`?q=low` / `?q=high` 可强制；右上角可点击切换 |
+| 低画质内容 | 地形 128 段、植被 35%、关闭阴影、像素比 1 |
+| 自动降级 | 运行时平均帧时间 > 34ms 时自动关阴影并降低像素比 |
+| 资产体积 | 约 650KB（含 2 张 colormap 图集与地形数据） |
+
+### 重新生成地形
+
+```bash
+node tools/gen_terrain.mjs     # 重新生成 public/tscn2/assets/terrain.bin
+```
+
+地形参数（seed/尺寸/山高/湖泊/村庄位置）同时写在 `tools/gen_terrain.mjs`（`TERRAIN`）
+与 `public/tscn2/index.html`（`CFG`）中，两者需保持一致；
+`tscn/godot/terrain.tscn` 为对应的参数说明文件。
 
 ## 免费额度与限制
 
