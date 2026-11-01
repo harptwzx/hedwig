@@ -22,39 +22,40 @@
 - `wrangler.toml`：新增 `BROWSER` 绑定 + `TSCN_SESSION` Durable Object
 - `tscn/godot/main.tscn`：场景源文件，渲染页实时从 GitHub 拉取解析
 
-## /tscn2：湖畔村庄（纯前端）
+## /tscn2：自由地形漫游（纯前端）
 
-`hedwig.eu.org/tscn2` 是免服务器的 3D 场景，浏览器直接用 Three.js 渲染，
-**不需要** Cloudflare 无头浏览器。场景为**风格化低多边形**（美术风格统一）：
+`hedwig.eu.org/tscn2` 是免服务器的 3D 场景，浏览器直接用 Three.js 渲染。
 
-- 地形：程序化湖光山色（湖泊 + 沙岸 + 远山雪顶 + 起伏丘陵），
-  高度场预生成为**二进制文件** `public/tscn2/assets/terrain.bin`（256×256 Uint16，128KB）
-- 村庄：木地板广场 + 喷泉 + 石板路 + 4 栋房屋（Kenney Modular Buildings）
-- 植被与道具：Kenney Fantasy Town（CC0）——针叶树/岩石/花坛/栅栏/路灯/马车/货摊/湖边水车
-- 天空渐变 + 太阳光晕、软阴影、雾效
+### 玩法与功能
 
-> 模型来自 [Kenney.nl](https://kenney.nl)（CC0 公共领域，可自由商用，无需署名）。
+- **移动**：左下虚拟摇杆（手机）/ `WASD`（电脑）；按住 `Shift` 加速
+- **视角**：拖动屏幕转动（第一人称漫游，走在地形上，不能走进深水）
+- **地形**：顶部可选择 4 套预设（湖畔村庄 / 高山松林 / 热带海岛 / 秋日丘陵）或 🎲 随机生成
+- **昼夜系统**：读取你所在位置的经纬度（浏览器允许时）与本地时间，
+  计算太阳高度/方位——白天有阳光，黄昏泛红，夜晚出现星空、月亮与月光；
+  月亮有相位变化；村庄路灯与房屋窗口在夜里亮起暖光
+  - 无法定位 / 无权限时使用本地时间 + 默认纬度 35°，再失败则按白天处理
+  - `?hour=22` 可强制某个时刻（便于调试/展示），`?noloc=1` 跳过定位
+- **日食**：点击右下「🌑 日食」触发一次演示（月亮遮住太阳，天色变暗）
+- **画质**：自动判断手机/小屏 → 低画质；`?q=low` / `?q=high` 强制；右上角可点切换；
+  运行中帧率过低会自动降级（关阴影、关点光源）
 
-### 性能设计（面向低性能设备）
+### 资产与性能
 
-| 手段 | 说明 |
-|---|---|
-| 实例化 | 所有树/岩石/道路/栅栏等同模型合并为 `InstancedMesh`，全场景仅 ~26 次绘制调用 |
-| 二进制高度图 | 页面优先加载 `terrain.bin`（客户端不跑噪声），失败自动回退到内置噪声 |
-| 画质分级 | 自动判断手机/小屏 → 低画质；`?q=low` / `?q=high` 可强制；右上角可点击切换 |
-| 低画质内容 | 地形 128 段、植被 35%、关闭阴影、像素比 1 |
-| 自动降级 | 运行时平均帧时间 > 34ms 时自动关阴影并降低像素比 |
-| 资产体积 | 约 650KB（含 2 张 colormap 图集与地形数据） |
+- 地形高度场预生成为二进制：`public/tscn2/assets/terrain-<预设>.bin`（每套 256×256 Uint16，128KB），
+  页面优先加载二进制，失败回退到内置噪声
+- 模型来自 [Kenney.nl](https://kenney.nl)（CC0）：Fantasy Town + Modular Buildings
+- 全部植被/道具使用 `InstancedMesh`，整场景仅数十次绘制调用
+- 资产约 1.1MB
 
 ### 重新生成地形
 
 ```bash
-node tools/gen_terrain.mjs     # 重新生成 public/tscn2/assets/terrain.bin
+node tools/gen_terrain.mjs     # 重新生成 presets.json 与各 terrain-*.bin
 ```
 
-地形参数（seed/尺寸/山高/湖泊/村庄位置）同时写在 `tools/gen_terrain.mjs`（`TERRAIN`）
-与 `public/tscn2/index.html`（`CFG`）中，两者需保持一致；
-`tscn/godot/terrain.tscn` 为对应的参数说明文件。
+预设参数（seed / 尺寸 / 山高 / 湖泊 / 海岸 / 村庄 / 调色板 / 植被比例）写在
+`tools/gen_terrain.mjs` 的 `PRESETS`；页面读取生成的 `presets.json` 与对应 `.bin`。
 
 ## 免费额度与限制
 

@@ -1,0 +1,313 @@
+{
+  "grid": 256,
+  "hMin": -15,
+  "hMax": 110,
+  "generated": "node tools/gen_terrain.mjs",
+  "presets": [
+    {
+      "id": "lakeside",
+      "name": "湖畔村庄",
+      "seed": 20240517,
+      "size": 400,
+      "mountainHeight": 58,
+      "waterLevel": 2.2,
+      "sandBand": 0.35,
+      "snowStart": 0.78,
+      "skyTop": 6001617,
+      "skyHorizon": 12376560,
+      "fogNear": 150,
+      "fogFar": 460,
+      "groves": 70,
+      "treeDensity": 1,
+      "rockCount": 60,
+      "hills": [
+        {
+          "x": -140,
+          "z": -70,
+          "r": 95,
+          "h": 26
+        },
+        {
+          "x": -40,
+          "z": -140,
+          "r": 120,
+          "h": 30
+        },
+        {
+          "x": 150,
+          "z": -90,
+          "r": 105,
+          "h": 24
+        },
+        {
+          "x": 165,
+          "z": 120,
+          "r": 125,
+          "h": 18
+        },
+        {
+          "x": -160,
+          "z": 130,
+          "r": 135,
+          "h": 16
+        },
+        {
+          "x": -20,
+          "z": 150,
+          "r": 110,
+          "h": 14
+        }
+      ],
+      "lake": {
+        "x": -58,
+        "z": 30,
+        "r": 54
+      },
+      "coast": null,
+      "village": {
+        "x": 40,
+        "z": 22,
+        "r": 42,
+        "y": 5.5
+      },
+      "palette": {
+        "grass": 7182922,
+        "grass2": 5603130,
+        "rock": 10133666,
+        "sand": 13218180,
+        "snow": 15265522,
+        "water": 5218260
+      },
+      "treeMix": {
+        "tree-high": 0.45,
+        "tree": 0.35,
+        "tree-high-crooked": 0.2
+      },
+      "file": "terrain-lakeside.bin"
+    },
+    {
+      "id": "alpine",
+      "name": "高山松林",
+      "seed": 917311,
+      "size": 400,
+      "mountainHeight": 92,
+      "waterLevel": 2.4,
+      "sandBand": 0.5,
+      "snowStart": 0.55,
+      "skyTop": 4884168,
+      "skyHorizon": 12834792,
+      "fogNear": 160,
+      "fogFar": 520,
+      "groves": 90,
+      "treeDensity": 1.25,
+      "rockCount": 95,
+      "hills": [
+        {
+          "x": -120,
+          "z": -90,
+          "r": 110,
+          "h": 44
+        },
+        {
+          "x": 30,
+          "z": -150,
+          "r": 130,
+          "h": 52
+        },
+        {
+          "x": 150,
+          "z": -70,
+          "r": 115,
+          "h": 40
+        },
+        {
+          "x": 170,
+          "z": 120,
+          "r": 130,
+          "h": 26
+        },
+        {
+          "x": -170,
+          "z": 120,
+          "r": 140,
+          "h": 30
+        },
+        {
+          "x": -30,
+          "z": 140,
+          "r": 120,
+          "h": 22
+        }
+      ],
+      "lake": {
+        "x": -30,
+        "z": 60,
+        "r": 44
+      },
+      "coast": null,
+      "village": {
+        "x": 70,
+        "z": 70,
+        "r": 40,
+        "y": 9
+      },
+      "palette": {
+        "grass": 6262610,
+        "grass2": 4484159,
+        "rock": 9410460,
+        "sand": 12431501,
+        "snow": 15791351,
+        "water": 4163256
+      },
+      "treeMix": {
+        "tree-high": 0.55,
+        "tree-high-crooked": 0.3,
+        "tree": 0.15
+      },
+      "file": "terrain-alpine.bin"
+    },
+    {
+      "id": "island",
+      "name": "热带海岛",
+      "seed": 420777,
+      "size": 400,
+      "mountainHeight": 42,
+      "waterLevel": 4,
+      "sandBand": 1,
+      "snowStart": 2,
+      "skyTop": 4170959,
+      "skyHorizon": 13823977,
+      "fogNear": 170,
+      "fogFar": 560,
+      "groves": 30,
+      "treeDensity": 0.55,
+      "rockCount": 34,
+      "hills": [
+        {
+          "x": 0,
+          "z": 0,
+          "r": 150,
+          "h": 30
+        },
+        {
+          "x": -70,
+          "z": -60,
+          "r": 60,
+          "h": 7
+        },
+        {
+          "x": 75,
+          "z": -35,
+          "r": 55,
+          "h": 6
+        }
+      ],
+      "lake": null,
+      "coast": {
+        "r": 140,
+        "depth": 16
+      },
+      "village": {
+        "x": 0,
+        "z": 0,
+        "r": 30,
+        "y": 26
+      },
+      "palette": {
+        "grass": 8104014,
+        "grass2": 6065212,
+        "rock": 10525324,
+        "sand": 14996636,
+        "snow": 16777215,
+        "water": 3060680
+      },
+      "treeMix": {
+        "tree": 0.5,
+        "tree-high": 0.3,
+        "tree-high-crooked": 0.2
+      },
+      "file": "terrain-island.bin"
+    },
+    {
+      "id": "autumn",
+      "name": "秋日丘陵",
+      "seed": 555001,
+      "size": 400,
+      "mountainHeight": 50,
+      "waterLevel": 2.2,
+      "sandBand": 0.6,
+      "snowStart": 0.85,
+      "skyTop": 13671002,
+      "skyHorizon": 15917764,
+      "fogNear": 150,
+      "fogFar": 470,
+      "groves": 85,
+      "treeDensity": 1.3,
+      "rockCount": 55,
+      "hills": [
+        {
+          "x": -130,
+          "z": -80,
+          "r": 100,
+          "h": 26
+        },
+        {
+          "x": 0,
+          "z": -150,
+          "r": 125,
+          "h": 30
+        },
+        {
+          "x": 140,
+          "z": -80,
+          "r": 100,
+          "h": 22
+        },
+        {
+          "x": 150,
+          "z": 120,
+          "r": 120,
+          "h": 20
+        },
+        {
+          "x": -150,
+          "z": 120,
+          "r": 130,
+          "h": 20
+        },
+        {
+          "x": -10,
+          "z": 150,
+          "r": 115,
+          "h": 16
+        }
+      ],
+      "lake": {
+        "x": -70,
+        "z": 40,
+        "r": 46
+      },
+      "coast": null,
+      "village": {
+        "x": 45,
+        "z": 30,
+        "r": 40,
+        "y": 6.5
+      },
+      "palette": {
+        "grass": 10984274,
+        "grass2": 8223292,
+        "rock": 9734524,
+        "sand": 13482378,
+        "snow": 15920870,
+        "water": 4886448
+      },
+      "treeMix": {
+        "tree": 0.5,
+        "tree-high-crooked": 0.3,
+        "tree-high": 0.2
+      },
+      "file": "terrain-autumn.bin"
+    }
+  ]
+}
